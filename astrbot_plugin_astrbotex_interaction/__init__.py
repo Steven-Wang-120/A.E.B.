@@ -1,0 +1,1 @@
+"""AstrBotEX ZeroMQ integration plugin."""

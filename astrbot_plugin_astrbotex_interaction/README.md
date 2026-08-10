@@ -1,0 +1,96 @@
+# AstrBotEX ZeroMQ Integration Plugin
+
+This plugin merges the former AstrBotEX interaction and bridge plugins. It
+registers the `astrbotex` platform adapter, injects EX context into LLM
+requests, exposes the proposal tool, proxies STT/TTS providers, and maintains
+three independent ZeroMQ channels.
+
+## Channel layout
+
+AstrBot binds three ROUTER sockets. AstrBotEX must connect one DEALER socket to
+each endpoint and send `system.hello` on every connection.
+
+| Channel | Default endpoint | Purpose |
+|---------|------------------|---------|
+| `text` | `tcp://0.0.0.0:8766` | Text interaction, replies, context, proposals, runtime commands |
+| `audio` | `tcp://0.0.0.0:8767` | Provider status, STT input, TTS output |
+| `vision` | `tcp://0.0.0.0:8768` | Future vision observations, vectors, and frames |
+
+The channels are intentionally separate. Slow STT/TTS or high-volume vision
+traffic cannot consume the text channel's queue.
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ASTRBOTEX_ZMQ_BIND_HOST` | `0.0.0.0` | Bind address for all three ROUTER sockets |
+| `ASTRBOTEX_ZMQ_TEXT_PORT` | `8766` | Text/JSON channel port |
+| `ASTRBOTEX_ZMQ_AUDIO_PORT` | `8767` | STT/TTS channel port |
+| `ASTRBOTEX_ZMQ_VISION_PORT` | `8768` | Vision/vector channel port |
+| `ASTRBOTEX_ZMQ_TIMEOUT_SEC` | `10` | Outbound request timeout |
+| `ASTRBOTEX_ZMQ_VISION_CACHE_STREAMS` | `8` | Number of latest vision streams retained |
+| `ASTRBOTEX_SESSION_ID` | `astrbotex_default` | Default platform session |
+
+When both containers are attached to the same Docker bridge network, no host
+port publication is required. The EX side connects to `tcp://astrbot:8766`,
+`tcp://astrbot:8767`, and `tcp://astrbot:8768`.
+
+## Protocol envelope
+
+The first multipart frame is UTF-8 JSON:
+
+```json
+{
+  "protocol": "astrbotex-zmq",
+  "version": 1,
+  "channel": "text",
+  "kind": "request",
+  "id": "request-uuid",
+  "method": "interaction.message",
+  "timestamp": 1786320000.0,
+  "payload": {}
+}
+```
+
+Responses use `kind=response` and include `reply_to` with the request ID. Audio
+and vision messages may append one binary multipart frame after the JSON frame.
+
+## Methods
+
+Text channel:
+
+- EX -> AstrBot: `interaction.message`, `transport.status`
+- AstrBot -> EX: `interaction.reply`, `bridge.context.get`,
+  `bridge.proposal.submit`, `runtime.status`
+
+Audio channel:
+
+- EX -> AstrBot: `providers.status`, `stt.transcribe`, `tts.synthesize`
+- `stt.transcribe` accepts a binary audio frame plus `filename` metadata.
+- `tts.synthesize` returns metadata plus a binary audio frame.
+
+Vision channel:
+
+- EX -> AstrBot: `vision.publish`, `vision.status`
+- `vision.publish` accepts JSON metadata and an optional binary vector/frame.
+- The plugin retains only the latest value for a bounded number of streams.
+
+## Installation
+
+1. Remove or disable the old `astrbot_plugin_astrbotex_bridge` plugin.
+2. Replace the old interaction plugin directory with this directory.
+3. Install `requirements.txt`; the required package is `pyzmq`.
+4. Keep the `astrbotex` platform enabled in `cmd_config.json`.
+5. Restart AstrBot and connect the three EX DEALER sockets.
+
+The old port `8766` is retained for the text channel, but it is no longer an
+HTTP server. HTTP requests sent to that port will not work.
+
+## Tests
+
+Build and run the isolated Docker test image from this directory:
+
+```sh
+docker build -f Dockerfile.test -t local/astrbotex-plugin-zmq-test .
+docker run --rm local/astrbotex-plugin-zmq-test
+```

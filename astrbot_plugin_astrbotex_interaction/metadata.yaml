@@ -1,0 +1,7 @@
+name: astrbot_plugin_astrbotex_interaction
+display_name: AstrBotEX ZeroMQ Integration
+desc: Connect AstrBot and AstrBotEX over independent text, audio, and vision ZeroMQ channels.
+version: 0.4.0
+author: AstrBotEX Team
+repo: ""
+astrbot_version: ">=4.5.7"
