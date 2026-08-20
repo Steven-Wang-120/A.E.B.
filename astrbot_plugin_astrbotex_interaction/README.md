@@ -2,8 +2,8 @@
 
 This plugin merges the former AstrBotEX interaction and bridge plugins. It
 registers the `astrbotex` platform adapter, injects EX context into LLM
-requests, exposes the proposal tool, proxies STT/TTS providers, and maintains
-three independent ZeroMQ channels.
+requests, exposes proposal and on-demand vision-buffer tools, proxies STT/TTS
+providers, and maintains three independent ZeroMQ channels.
 
 ## Channel layout
 
@@ -12,9 +12,9 @@ each endpoint and send `system.hello` on every connection.
 
 | Channel | Default endpoint | Purpose |
 |---------|------------------|---------|
-| `text` | `tcp://0.0.0.0:8766` | Text interaction, replies, context, proposals, runtime commands |
+| `text` | `tcp://0.0.0.0:8766` | Text interaction, replies, context, proposals, runtime commands, vision JSON fields |
 | `audio` | `tcp://0.0.0.0:8767` | Provider status, STT input, TTS output |
-| `vision` | `tcp://0.0.0.0:8768` | Future vision observations, vectors, and frames |
+| `vision` | `tcp://0.0.0.0:8768` | JPEG image frames and vision binary payloads |
 
 The channels are intentionally separate. Slow STT/TTS or high-volume vision
 traffic cannot consume the text channel's queue.
@@ -26,9 +26,10 @@ traffic cannot consume the text channel's queue.
 | `ASTRBOTEX_ZMQ_BIND_HOST` | `0.0.0.0` | Bind address for all three ROUTER sockets |
 | `ASTRBOTEX_ZMQ_TEXT_PORT` | `8766` | Text/JSON channel port |
 | `ASTRBOTEX_ZMQ_AUDIO_PORT` | `8767` | STT/TTS channel port |
-| `ASTRBOTEX_ZMQ_VISION_PORT` | `8768` | Vision/vector channel port |
+| `ASTRBOTEX_ZMQ_VISION_PORT` | `8768` | JPEG/binary vision channel port |
 | `ASTRBOTEX_ZMQ_TIMEOUT_SEC` | `10` | Outbound request timeout |
-| `ASTRBOTEX_ZMQ_VISION_CACHE_STREAMS` | `8` | Number of latest vision streams retained |
+| `ASTRBOTEX_ZMQ_VISION_CACHE_ITEMS` | `8` | Number of latest JSON records and JPEG frames retained in each separate vision cache |
+| `ASTRBOTEX_ZMQ_VISION_CACHE_STREAMS` | `8` | Deprecated compatibility alias for `ASTRBOTEX_ZMQ_VISION_CACHE_ITEMS` |
 | `ASTRBOTEX_SESSION_ID` | `astrbotex_default` | Default platform session |
 
 When both containers are attached to the same Docker bridge network, no host
@@ -59,9 +60,12 @@ and vision messages may append one binary multipart frame after the JSON frame.
 
 Text channel:
 
-- EX -> AstrBot: `interaction.message`, `transport.status`
+- EX -> AstrBot: `interaction.message`, `transport.status`, `vision.json.publish`,
+  `vision.json.status`
 - AstrBot -> EX: `interaction.reply`, `bridge.context.get`,
   `bridge.proposal.submit`, `runtime.status`
+- `vision.json.publish` accepts YOLO/object-detection JSON fields only. It does
+  not accept a binary multipart frame.
 
 Audio channel:
 
@@ -71,9 +75,18 @@ Audio channel:
 
 Vision channel:
 
-- EX -> AstrBot: `vision.publish`, `vision.status`
-- `vision.publish` accepts JSON metadata and an optional binary vector/frame.
-- The plugin retains only the latest value for a bounded number of streams.
+- EX -> AstrBot: `vision.jpeg.publish`, `vision.status`
+- `vision.jpeg.publish` accepts JPEG metadata plus one binary multipart frame.
+- `vision.publish` remains as a backward-compatible combined JSON + optional
+  binary method, but new clients should use the split JSON/JPEG methods above.
+- A.E.B keeps two independent bounded caches: latest 8 JSON records and latest
+  8 JPEG frames by default.
+- The `get_astrbotex_vision_json_buffer` LLM tool returns buffered JSON fields.
+- The `get_astrbotex_vision_jpeg_buffer` LLM tool returns buffered JPEG images
+  as MCP image content without changing their bytes.
+- Vision payloads are not added by the automatic LLM request hook. JSON and
+  images become visible to the model only after it explicitly calls the vision
+  buffer tools.
 
 ## Installation
 

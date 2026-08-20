@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import tempfile
-from collections import OrderedDict, defaultdict, deque
+from collections import defaultdict, deque
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import mcp
 
 from astrbot.api import FunctionTool, logger, star
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult, filter
@@ -41,7 +44,7 @@ DEFAULT_SESSION_ID = "astrbotex_default"
 DEFAULT_REQUEST_TIMEOUT_SEC = 10.0
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_VISION_BYTES = 64 * 1024 * 1024
-MAX_VISION_STREAMS = 8
+MAX_VISION_CACHE_ITEMS = 8
 
 
 def _endpoint(host: str, port: int) -> str:
@@ -262,6 +265,104 @@ class SubmitAstrBotEXProposalTool(FunctionTool[AstrAgentContext]):
         return json_dumps(result)
 
 
+@dataclass
+class GetVisionJsonBufferTool(FunctionTool[AstrAgentContext]):
+    """Return buffered vision JSON observations only when explicitly called."""
+
+    name: str = "get_astrbotex_vision_json_buffer"
+    description: str = (
+        "Read buffered AstrBotEX YOLO/object-detection JSON on demand. Returns the "
+        "latest JSON fields, or a bounded newest-first history. This tool must be "
+        "called explicitly; vision JSON is not injected into prompts automatically."
+    )
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "stream_id": {
+                    "type": "string",
+                    "description": "Optional vision stream ID. Omit to read the most recently updated stream.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Number of newest JSON records to return, up to the configured cache size.",
+                    "default": 1,
+                    "minimum": 1,
+                },
+            },
+        }
+    )
+    plugin: AstrBotEXInteractionPlugin | None = None
+
+    async def call(
+        self,
+        context: ContextWrapper[AstrAgentContext],
+        **kwargs: Any,
+    ) -> ToolExecResult:
+        del context
+        if self.plugin is None:
+            return "AstrBotEX vision JSON buffer is not initialized."
+        stream_id = str(kwargs.get("stream_id", "")).strip() or None
+        try:
+            limit = int(kwargs.get("limit", 1) or 1)
+        except (TypeError, ValueError):
+            limit = 1
+        return self.plugin.get_vision_json_buffer_result(stream_id, limit)
+
+
+@dataclass
+class GetVisionJpegBufferTool(FunctionTool[AstrAgentContext]):
+    """Return buffered vision JPEG frames only when explicitly called."""
+
+    name: str = "get_astrbotex_vision_jpeg_buffer"
+    description: str = (
+        "Read buffered AstrBotEX JPEG frames on demand. Returns one selected JPEG "
+        "as an MCP image content block plus routing metadata. This tool must be "
+        "called explicitly; images are not injected into prompts automatically."
+    )
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "stream_id": {
+                    "type": "string",
+                    "description": "Optional vision stream ID. Omit to read the most recently updated stream.",
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "Newest-first image index. 0 returns the latest matching JPEG.",
+                    "default": 0,
+                    "minimum": 0,
+                },
+                "include_image": {
+                    "type": "boolean",
+                    "description": "Include the JPEG image content block in the result.",
+                    "default": True,
+                },
+            },
+        }
+    )
+    plugin: AstrBotEXInteractionPlugin | None = None
+
+    async def call(
+        self,
+        context: ContextWrapper[AstrAgentContext],
+        **kwargs: Any,
+    ) -> ToolExecResult:
+        del context
+        if self.plugin is None:
+            return "AstrBotEX vision JPEG buffer is not initialized."
+        stream_id = str(kwargs.get("stream_id", "")).strip() or None
+        try:
+            index = int(kwargs.get("index", 0) or 0)
+        except (TypeError, ValueError):
+            index = 0
+        include_image = bool(kwargs.get("include_image", True))
+        return self.plugin.get_vision_jpeg_buffer_result(
+            stream_id, index, include_image
+        )
+
+
 def json_dumps(payload: Any) -> str:
     import json
 
@@ -272,7 +373,7 @@ def json_dumps(payload: Any) -> str:
     "astrbot_plugin_astrbotex_interaction",
     "AstrBotEX Team",
     "Bridge AstrBot and AstrBotEX through independent ZeroMQ text, audio, and vision channels.",
-    "0.4.0",
+    "0.5.0",
 )
 class AstrBotEXInteractionPlugin(star.Star):
     """Merged AstrBotEX platform, bridge, provider proxy, and ZMQ transport."""
@@ -297,17 +398,31 @@ class AstrBotEXInteractionPlugin(star.Star):
                 "ASTRBOTEX_ZMQ_TIMEOUT_SEC", str(DEFAULT_REQUEST_TIMEOUT_SEC)
             )
         )
-        self.vision_cache_streams = int(
+        self.vision_cache_items = int(
             os.environ.get(
-                "ASTRBOTEX_ZMQ_VISION_CACHE_STREAMS", str(MAX_VISION_STREAMS)
+                "ASTRBOTEX_ZMQ_VISION_CACHE_ITEMS",
+                os.environ.get(
+                    "ASTRBOTEX_ZMQ_VISION_CACHE_STREAMS",
+                    str(MAX_VISION_CACHE_ITEMS),
+                ),
             )
         )
+        self.vision_cache_streams = self.vision_cache_items
         self.text_channel: ZmqRouterChannel | None = None
         self.audio_channel: ZmqRouterChannel | None = None
         self.vision_channel: ZmqRouterChannel | None = None
         self._adapter: AstrBotEXPlatformAdapter | None = None
-        self._vision_latest: OrderedDict[str, dict[str, Any]] = OrderedDict()
-        self.context.add_llm_tools(SubmitAstrBotEXProposalTool(plugin=self))
+        self._vision_json_cache: deque[dict[str, Any]] = deque(
+            maxlen=max(self.vision_cache_items, 1)
+        )
+        self._vision_jpeg_cache: deque[dict[str, Any]] = deque(
+            maxlen=max(self.vision_cache_items, 1)
+        )
+        self.context.add_llm_tools(
+            SubmitAstrBotEXProposalTool(plugin=self),
+            GetVisionJsonBufferTool(plugin=self),
+            GetVisionJpegBufferTool(plugin=self),
+        )
 
     async def initialize(self) -> None:
         self.text_channel = ZmqRouterChannel(
@@ -331,11 +446,20 @@ class AstrBotEXInteractionPlugin(star.Star):
 
         self.text_channel.register_handler("interaction.message", self._handle_message)
         self.text_channel.register_handler("transport.status", self._handle_text_status)
+        self.text_channel.register_handler(
+            "vision.json.publish", self._handle_vision_json_publish
+        )
+        self.text_channel.register_handler(
+            "vision.json.status", self._handle_vision_json_status
+        )
         self.audio_channel.register_handler("providers.status", self._handle_providers)
         self.audio_channel.register_handler("stt.transcribe", self._handle_stt)
         self.audio_channel.register_handler("tts.synthesize", self._handle_tts)
         self.vision_channel.register_handler(
             "vision.publish", self._handle_vision_publish
+        )
+        self.vision_channel.register_handler(
+            "vision.jpeg.publish", self._handle_vision_jpeg_publish
         )
         self.vision_channel.register_handler(
             "vision.status", self._handle_vision_status
@@ -603,24 +727,153 @@ class AstrBotEXInteractionPlugin(star.Star):
         envelope: dict[str, Any],
         binary: bytes | None,
     ) -> dict[str, Any]:
+        """Compatibility handler for older clients that sent JSON and JPEG together."""
         del peer
         if binary is not None and len(binary) > MAX_VISION_BYTES:
             return {"ok": False, "error": "vision frame exceeds 64 MiB limit"}
         data = dict(envelope.get("payload", {}))
-        stream_id = str(data.get("stream_id", "default"))
-        self._vision_latest[stream_id] = {
-            "payload": data,
-            "binary": binary,
-            "received_at": asyncio.get_running_loop().time(),
-        }
-        self._vision_latest.move_to_end(stream_id)
-        while len(self._vision_latest) > max(self.vision_cache_streams, 1):
-            self._vision_latest.popitem(last=False)
+        json_result = self._append_vision_json(data)
+        if binary is not None:
+            self._append_vision_jpeg(data, binary)
         return {
             "ok": True,
-            "stream_id": stream_id,
+            "stream_id": json_result["stream_id"],
             "bytes": len(binary) if binary is not None else 0,
+            "json_items": len(self._vision_json_cache),
+            "jpeg_items": len(self._vision_jpeg_cache),
         }
+
+    async def _handle_vision_json_publish(
+        self,
+        peer: bytes,
+        envelope: dict[str, Any],
+        binary: bytes | None,
+    ) -> dict[str, Any]:
+        del peer
+        if binary is not None:
+            return {"ok": False, "error": "vision JSON channel does not accept binary frames"}
+        data = dict(envelope.get("payload", {}))
+        return {"ok": True, **self._append_vision_json(data)}
+
+    async def _handle_vision_jpeg_publish(
+        self,
+        peer: bytes,
+        envelope: dict[str, Any],
+        binary: bytes | None,
+    ) -> dict[str, Any]:
+        del peer
+        if binary is None:
+            return {"ok": False, "error": "JPEG binary frame is required"}
+        if len(binary) > MAX_VISION_BYTES:
+            return {"ok": False, "error": "vision frame exceeds 64 MiB limit"}
+        data = dict(envelope.get("payload", {}))
+        return {"ok": True, **self._append_vision_jpeg(data, binary)}
+
+    def get_vision_json_buffer_result(
+        self,
+        stream_id: str | None = None,
+        limit: int = 1,
+    ) -> ToolExecResult:
+        items = self._select_cache_items(self._vision_json_cache, stream_id, limit)
+        if not items:
+            return mcp.types.CallToolResult(
+                content=[
+                    mcp.types.TextContent(
+                        type="text",
+                        text=json_dumps(
+                            {
+                                "ok": False,
+                                "error": self._empty_cache_message(
+                                    "vision JSON buffer", stream_id
+                                ),
+                            }
+                        ),
+                    )
+                ],
+                isError=True,
+            )
+
+        result_payload = {
+            "ok": True,
+            "count": len(items),
+            "cache_size": len(self._vision_json_cache),
+            "items": [
+                {
+                    "stream_id": item["stream_id"],
+                    "frame_id": item["frame_id"],
+                    "received_at": item["received_at"],
+                    "payload": item["payload"],
+                }
+                for item in items
+            ],
+        }
+        return mcp.types.CallToolResult(
+            content=[mcp.types.TextContent(type="text", text=json_dumps(result_payload))]
+        )
+
+    def get_vision_jpeg_buffer_result(
+        self,
+        stream_id: str | None = None,
+        index: int = 0,
+        include_image: bool = True,
+    ) -> ToolExecResult:
+        safe_index = max(index, 0)
+        items = self._select_cache_items(
+            self._vision_jpeg_cache, stream_id, safe_index + 1
+        )
+        if len(items) <= safe_index:
+            return mcp.types.CallToolResult(
+                content=[
+                    mcp.types.TextContent(
+                        type="text",
+                        text=json_dumps(
+                            {
+                                "ok": False,
+                                "error": self._empty_cache_message(
+                                    "vision JPEG buffer", stream_id
+                                ),
+                            }
+                        ),
+                    )
+                ],
+                isError=True,
+            )
+
+        item = items[safe_index]
+        payload = dict(item["payload"])
+        binary = item["binary"]
+        mime_type = str(
+            payload.get("frame_content_type")
+            or payload.get("content_type")
+            or "image/jpeg"
+        ).lower()
+        if mime_type == "image/jpg":
+            mime_type = "image/jpeg"
+        image_returned = bool(
+            include_image and binary is not None and mime_type.startswith("image/")
+        )
+        result_payload = {
+            "ok": True,
+            "stream_id": item["stream_id"],
+            "frame_id": item["frame_id"],
+            "index": safe_index,
+            "bytes": len(binary) if binary is not None else 0,
+            "mime_type": mime_type if binary is not None else None,
+            "image_returned": image_returned,
+            "payload": payload,
+        }
+        content: list[mcp.types.ContentBlock] = [
+            mcp.types.TextContent(type="text", text=json_dumps(result_payload))
+        ]
+        if image_returned:
+            content.append(
+                mcp.types.ImageContent(
+                    type="image",
+                    data=base64.b64encode(binary).decode("ascii"),
+                    mimeType=mime_type,
+                )
+            )
+        return mcp.types.CallToolResult(content=content)
 
     async def _handle_vision_status(
         self,
@@ -629,16 +882,107 @@ class AstrBotEXInteractionPlugin(star.Star):
         binary: bytes | None,
     ) -> dict[str, Any]:
         del peer, envelope, binary
-        streams = []
-        for stream_id, item in self._vision_latest.items():
-            streams.append(
-                {
-                    "stream_id": stream_id,
-                    "bytes": len(item["binary"]) if item["binary"] is not None else 0,
-                    "payload": item["payload"],
-                }
-            )
-        return {"ok": True, "streams": streams}
+        return {
+            "ok": True,
+            "json": self._cache_status(self._vision_json_cache, include_payload=True),
+            "jpeg": self._cache_status(self._vision_jpeg_cache, include_payload=True),
+        }
+
+    async def _handle_vision_json_status(
+        self,
+        peer: bytes,
+        envelope: dict[str, Any],
+        binary: bytes | None,
+    ) -> dict[str, Any]:
+        del peer, envelope, binary
+        return {
+            "ok": True,
+            "json": self._cache_status(self._vision_json_cache, include_payload=True),
+        }
+
+    def _append_vision_json(self, payload: dict[str, Any]) -> dict[str, Any]:
+        stream_id = str(payload.get("stream_id", "default"))
+        frame_id = payload.get("frame_id")
+        self._vision_json_cache.append(
+            {
+                "stream_id": stream_id,
+                "frame_id": frame_id,
+                "payload": dict(payload),
+                "received_at": asyncio.get_running_loop().time(),
+            }
+        )
+        return {
+            "stream_id": stream_id,
+            "frame_id": frame_id,
+            "items": len(self._vision_json_cache),
+        }
+
+    def _append_vision_jpeg(self, payload: dict[str, Any], binary: bytes) -> dict[str, Any]:
+        stream_id = str(payload.get("stream_id", "default"))
+        frame_id = payload.get("frame_id")
+        image_payload = dict(payload)
+        image_payload["frame_content_type"] = str(
+            image_payload.get("frame_content_type") or "image/jpeg"
+        )
+        self._vision_jpeg_cache.append(
+            {
+                "stream_id": stream_id,
+                "frame_id": frame_id,
+                "payload": image_payload,
+                "binary": binary,
+                "received_at": asyncio.get_running_loop().time(),
+            }
+        )
+        return {
+            "stream_id": stream_id,
+            "frame_id": frame_id,
+            "bytes": len(binary),
+            "items": len(self._vision_jpeg_cache),
+        }
+
+    @staticmethod
+    def _select_cache_items(
+        cache: deque[dict[str, Any]],
+        stream_id: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        capped_limit = max(1, int(limit))
+        matches: list[dict[str, Any]] = []
+        for item in reversed(cache):
+            if stream_id is not None and item["stream_id"] != stream_id:
+                continue
+            matches.append(item)
+            if len(matches) >= capped_limit:
+                break
+        return matches
+
+    @staticmethod
+    def _empty_cache_message(cache_name: str, stream_id: str | None) -> str:
+        if stream_id:
+            return f"{cache_name} has no item for stream: {stream_id}"
+        return f"{cache_name} is empty"
+
+    @staticmethod
+    def _cache_status(
+        cache: deque[dict[str, Any]],
+        *,
+        include_payload: bool,
+    ) -> dict[str, Any]:
+        items = []
+        for item in cache:
+            value = {
+                "stream_id": item["stream_id"],
+                "frame_id": item["frame_id"],
+                "received_at": item["received_at"],
+                "bytes": len(item.get("binary") or b""),
+            }
+            if include_payload:
+                value["payload"] = item["payload"]
+            items.append(value)
+        return {
+            "items": items,
+            "count": len(items),
+        }
 
     def _transport_status(self) -> dict[str, Any]:
         return {
@@ -659,7 +1003,11 @@ class AstrBotEXInteractionPlugin(star.Star):
                     else 0,
                 },
             },
-            "vision_streams": len(self._vision_latest),
+            "vision_streams": max(
+                len(self._vision_json_cache), len(self._vision_jpeg_cache)
+            ),
+            "vision_json_items": len(self._vision_json_cache),
+            "vision_jpeg_items": len(self._vision_jpeg_cache),
         }
 
     def _get_configured_tts_provider(self) -> Any | None:
