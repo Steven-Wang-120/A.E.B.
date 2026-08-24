@@ -9,6 +9,7 @@ import sys
 import time
 import unittest
 import uuid
+from types import SimpleNamespace
 from pathlib import Path
 from typing import ClassVar
 
@@ -171,6 +172,44 @@ class PluginChannelTests(unittest.IsolatedAsyncioTestCase):
             vision_status["payload"]["jpeg"]["items"][0]["stream_id"],
             "front-camera-yolo",
         )
+
+    async def test_event_segments_reuse_the_same_reply_route(self) -> None:
+        class FakeTextChannel:
+            default_peer = b"default-peer"
+
+            def __init__(self) -> None:
+                self.requests = []
+
+            async def request(self, method, payload, *, peer, timeout_sec):
+                self.requests.append((method, payload, peer, timeout_sec))
+                return SimpleNamespace(payload={"ok": True})
+
+        adapter = plugin_module.AstrBotEXPlatformAdapter({}, {}, asyncio.Queue())
+        channel = FakeTextChannel()
+        adapter.configure_transport(channel, "session-1", 1.0)
+        metadata = {"turn_id": "turn-1", "generation": 7}
+        adapter._pending_routes["session-1"].append((b"origin-peer", metadata))
+
+        message = plugin_module.AstrBotMessage()
+        message.type = plugin_module.MessageType.FRIEND_MESSAGE
+        message.session_id = "session-1"
+        event = plugin_module.AstrBotEXMessageEvent(
+            message_str="input",
+            message_obj=message,
+            platform_meta=adapter.meta(),
+            session_id="session-1",
+            adapter=adapter,
+            peer=b"origin-peer",
+            route_metadata=metadata,
+        )
+        await event.send(plugin_module.MessageChain().message("first"))
+        await event.send(plugin_module.MessageChain().message("second"))
+
+        self.assertEqual([item[2] for item in channel.requests], [b"origin-peer"] * 2)
+        self.assertEqual(
+            [item[1]["turn_id"] for item in channel.requests], ["turn-1"] * 2
+        )
+        self.assertNotIn("session-1", adapter._pending_routes)
 
     async def test_split_vision_tools_return_exact_json_and_jpeg(self) -> None:
         frame = b"\xff\xd8" + bytes(index % 251 for index in range(630)) + b"\xff\xd9"

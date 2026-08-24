@@ -110,8 +110,9 @@ class AstrBotEXPlatformAdapter(Platform):
                     if not text:
                         continue
                     metadata = msg_data.get("metadata", {})
-                    if isinstance(metadata, dict):
-                        self._pending_routes[session_id].append((peer, dict(metadata)))
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+                    self._pending_routes[session_id].append((peer, dict(metadata)))
 
                     abm = AstrBotMessage()
                     abm.self_id = "astrbotex"
@@ -131,6 +132,8 @@ class AstrBotEXPlatformAdapter(Platform):
                         platform_meta=self.meta(),
                         session_id=session_id,
                         adapter=self,
+                        peer=peer,
+                        route_metadata=metadata,
                     )
                     event.is_wake = True
                     self.commit_event(event)
@@ -151,6 +154,10 @@ class AstrBotEXPlatformAdapter(Platform):
         self,
         session: MessageSesion,
         message_chain: MessageChain,
+        *,
+        peer: bytes | None = None,
+        route_metadata: dict[str, Any] | None = None,
+        consume_pending: bool = True,
     ) -> None:
         """Send a plain-text AstrBot reply over the text channel."""
         text = message_chain.get_plain_text().strip()
@@ -158,14 +165,19 @@ class AstrBotEXPlatformAdapter(Platform):
             return
 
         session_id = str(getattr(session, "session_id", self._session_id))
-        route_and_metadata = self._pending_routes.get(session_id)
-        if route_and_metadata:
-            peer, metadata = route_and_metadata.popleft()
-            if not route_and_metadata:
-                self._pending_routes.pop(session_id, None)
+        if peer is not None:
+            metadata = dict(route_metadata or {})
+            if consume_pending:
+                self._discard_pending_route(session_id, peer, metadata)
         else:
-            peer = self._text_channel.default_peer
-            metadata = {}
+            route_and_metadata = self._pending_routes.get(session_id)
+            if route_and_metadata:
+                peer, metadata = route_and_metadata.popleft()
+                if not route_and_metadata:
+                    self._pending_routes.pop(session_id, None)
+            else:
+                peer = self._text_channel.default_peer
+                metadata = {}
         if peer is None:
             logger.warning("AstrBotEX reply dropped: no text-channel peer.")
             return
@@ -188,6 +200,23 @@ class AstrBotEXPlatformAdapter(Platform):
         except ZmqTransportError as exc:
             logger.warning(f"AstrBotEX reply request failed: {exc}")
 
+    def _discard_pending_route(
+        self,
+        session_id: str,
+        peer: bytes,
+        metadata: dict[str, Any],
+    ) -> None:
+        """Remove the event-owned route while retaining later queued routes."""
+        route_and_metadata = self._pending_routes.get(session_id)
+        if not route_and_metadata:
+            return
+        try:
+            route_and_metadata.remove((peer, metadata))
+        except ValueError:
+            return
+        if not route_and_metadata:
+            self._pending_routes.pop(session_id, None)
+
     def meta(self) -> PlatformMetadata:
         return self.metadata
 
@@ -200,13 +229,25 @@ class AstrBotEXMessageEvent(AstrMessageEvent):
         platform_meta: PlatformMetadata,
         session_id: str,
         adapter: AstrBotEXPlatformAdapter,
+        peer: bytes,
+        route_metadata: dict[str, Any],
     ) -> None:
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self._adapter = adapter
+        self._peer = peer
+        self._route_metadata = dict(route_metadata)
+        self._route_consumed = False
 
     async def send(self, message: MessageChain) -> None:
         """Forward passive replies and preserve AstrBot event bookkeeping."""
-        await self._adapter.forward_reply(self.session, message)
+        await self._adapter.forward_reply(
+            self.session,
+            message,
+            peer=self._peer,
+            route_metadata=self._route_metadata,
+            consume_pending=not self._route_consumed,
+        )
+        self._route_consumed = True
         await super().send(message)
 
 
