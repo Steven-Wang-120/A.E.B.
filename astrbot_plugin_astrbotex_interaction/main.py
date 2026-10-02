@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import json
+import uuid
 import os
 import tempfile
 from collections import defaultdict, deque
@@ -30,6 +33,10 @@ from astrbot.core.agent.tool import ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
 from astrbot.core.platform.astr_message_event import MessageSesion
 
+from .output_router import PublicOutputRouter
+from .task_coordinator import TaskCoordinator
+from .task_models import TaskAuthority, TaskError
+from .task_store import TaskStore
 from .zmq_transport import (
     ZmqReply,
     ZmqRouterChannel,
@@ -182,6 +189,10 @@ class AstrBotEXPlatformAdapter(Platform):
             logger.warning("AstrBotEX reply dropped: no text-channel peer.")
             return
 
+        if not PublicOutputRouter.permits_automatic_output(
+            metadata.get("source"), task_id=metadata.get("task_id")
+        ) or metadata.get("visibility") == "private_planning":
+            return
         payload: dict[str, Any] = {
             "text": text,
             "session_id": session_id,
@@ -240,6 +251,10 @@ class AstrBotEXMessageEvent(AstrMessageEvent):
 
     async def send(self, message: MessageChain) -> None:
         """Forward passive replies and preserve AstrBot event bookkeeping."""
+        if (self._route_metadata.get("visibility") == "private_planning"
+                or not PublicOutputRouter.permits_automatic_output(
+                    self._route_metadata.get("source"), task_id=self._route_metadata.get("task_id"))):
+            return
         await self._adapter.forward_reply(
             self.session,
             message,
@@ -449,6 +464,13 @@ class AstrBotEXInteractionPlugin(star.Star):
             )
         )
         self.vision_cache_streams = self.vision_cache_items
+        self.task_planning_enabled = os.environ.get("ASTRBOTEX_TASK_PLANNING", "0") == "1"
+        self.task_provider_id = os.environ.get("ASTRBOTEX_TASK_PROVIDER_ID", "")
+        self.task_store: TaskStore | None = None
+        self.task_coordinator: TaskCoordinator | None = None
+        self.task_robot_id = os.environ.get("ASTRBOTEX_TASK_ROBOT_ID", "")
+        self.task_peer_id = os.environ.get("ASTRBOTEX_TASK_PEER_ID", "")
+        self._task_routes: dict[str, dict[str, Any]] = {}
         self.text_channel: ZmqRouterChannel | None = None
         self.audio_channel: ZmqRouterChannel | None = None
         self.vision_channel: ZmqRouterChannel | None = None
@@ -513,6 +535,19 @@ class AstrBotEXInteractionPlugin(star.Star):
         except Exception:
             await self.terminate()
             raise
+        if self.task_planning_enabled:
+            db_path = os.environ.get("ASTRBOTEX_TASK_DB_PATH", "")
+            if not db_path or not self.task_provider_id or not callable(getattr(self.context, "llm_generate", None)):
+                await self.terminate()
+                raise RuntimeError("private planning requires TASK_DB_PATH, TASK_PROVIDER_ID and public Context.llm_generate")
+            self.task_store = TaskStore(db_path)
+            router = PublicOutputRouter(self.task_store, self._send_task_message)
+            self.task_coordinator = TaskCoordinator(
+                self.task_store, self._request_decision, host=self.context,
+                provider_id=self.task_provider_id, router=router, turn_sync=self._sync_task_turn,
+            )
+            self.task_coordinator.start()
+            self.text_channel.register_handler("decision.feedback", self._handle_decision_feedback)
         await self._attach_platform(log_missing=True)
         logger.info(
             "AstrBotEX ZeroMQ channels started: text=%s, audio=%s, vision=%s",
@@ -550,15 +585,123 @@ class AstrBotEXInteractionPlugin(star.Star):
         payload: dict[str, Any],
         *,
         timeout_sec: float | None = None,
+        peer: bytes | None = None,
+        business_rejection: bool = False,
     ) -> dict[str, Any]:
         if self.text_channel is None:
             raise ZmqTransportError("text channel is not initialized")
-        reply = await self.text_channel.request(
-            method,
-            payload,
-            timeout_sec=timeout_sec,
-        )
+        if business_rejection and method == "decision.goal.submit":
+            def validate_rejection(result):
+                TaskCoordinator._validate_submit_result(payload, result)
+                if result["ok"] is not False or result["phase"] != "rejected":
+                    raise TaskError("invalid_submit_response")
+            reply = await self.text_channel.request(
+                method, payload, timeout_sec=timeout_sec, peer=peer,
+                business_rejection_validator=validate_rejection,
+            )
+        else:
+            reply = await self.text_channel.request(
+                method, payload, timeout_sec=timeout_sec, peer=peer,
+            )
         return reply.payload
+
+    def admit_task_route(self, authority: TaskAuthority, peer: bytes, *, origin: str = "",
+                         source_session: str = "") -> None:
+        """Bind full trusted identity immutably; never consume a model/network claim."""
+        authority.validate()
+        data = {k: getattr(authority, k) for k in ("robot_id", "session_id", "user_id", "route_ref")}
+        data.update(peer_hex=peer.hex(), origin=origin, source_session=source_session)
+        prior = self._task_routes.get(authority.route_ref)
+        if prior and prior != data:
+            raise TaskError("route_owner_mismatch")
+        if self.task_store is not None:
+            self.task_store.bind_route(authority, peer, origin=origin, source_session=source_session)
+        self._task_routes[authority.route_ref] = data
+
+    def begin_robot_task(self, authority: TaskAuthority, text: str, request_id: str) -> dict:
+        if self.task_coordinator is None:
+            raise TaskError("task_planning_disabled")
+        authority.validate()
+        self._task_peer(authority.robot_id, authority.route_ref)
+        route = self._task_routes[authority.route_ref]
+        if any(route[k] != getattr(authority, k) for k in ("robot_id", "session_id", "user_id", "route_ref")):
+            raise TaskError("route_owner_mismatch")
+        return self.task_coordinator.create_task(authority, text, request_id)
+
+    def _task_peer(self, robot_id: str, route_ref: str) -> bytes:
+        route = self._task_routes.get(route_ref)
+        if route is None or route["robot_id"] != robot_id:
+            raise TaskError("unbound_task_route")
+        return bytes.fromhex(route["peer_hex"])
+
+    def _task_authority(self, event: AstrMessageEvent) -> TaskAuthority:
+        if not event.is_admin():
+            raise TaskError("unauthorized")
+        if not self.task_planning_enabled or self.task_coordinator is None:
+            raise TaskError("task_planning_disabled")
+        from .task_contracts import require_id
+        require_id(self.task_robot_id, "configured_robot_id")
+        origin = event.unified_msg_origin
+        sender = event.get_sender_id()
+        session = event.get_session_id()
+        require_id(origin, "origin")
+        require_id(sender, "sender")
+        require_id(session, "session")
+        # UMO includes platform instance/type and session. Never trust raw_message.
+        route_ref = hashlib.sha256(json.dumps([self.task_robot_id, origin, sender],
+                                             ensure_ascii=False).encode()).hexdigest()
+        auth = TaskAuthority(self.task_robot_id, origin, sender, route_ref, True)
+        saved = self.task_store.route(route_ref)
+        bound_peer = None
+        if isinstance(event, AstrBotEXMessageEvent):
+            if event._adapter is not self._adapter:
+                raise TaskError("untrusted_ex_event")
+            bound_peer = event._peer
+        if self.task_peer_id:
+            configured = self.task_peer_id.encode("utf-8")
+            if bound_peer is not None and bound_peer != configured:
+                raise TaskError("task_peer_conflict")
+            bound_peer = configured
+        if saved is not None:
+            saved_peer = bytes.fromhex(saved["peer_hex"])
+            if bound_peer is not None and bound_peer != saved_peer:
+                raise TaskError("route_owner_mismatch")
+            bound_peer = saved_peer
+        if bound_peer is None:
+            peers = self.text_channel.online_peers() if self.text_channel else ()
+            if len(peers) != 1:
+                raise TaskError("ambiguous_task_peer" if peers else "task_peer_unavailable")
+            bound_peer = peers[0]
+        self.admit_task_route(auth, bound_peer, origin=origin, source_session=session)
+        return auth
+
+    async def _sync_task_turn(self, payload: dict) -> None:
+        # Fail closed on a non-acknowledging response; callback success gates tools.
+        result = await self.request_text("interaction.task.turn", payload,
+                               peer=self._task_peer(payload["robot_id"], payload["route_ref"]))
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise TaskError("turn_sync_failed")
+
+    async def _request_decision(self, robot_id: str, route_ref: str, method: str, payload: dict) -> dict:
+        from .task_contracts import parse_request
+        parse_request(method, payload)
+        return await self.request_text(method, payload, peer=self._task_peer(robot_id, route_ref),
+                                       business_rejection=method == "decision.goal.submit")
+
+    async def _send_task_message(self, payload: dict) -> dict:
+        return await self.request_text("interaction.reply", payload,
+            peer=self._task_peer(payload["robot_id"], payload["route_ref"]))
+
+    async def _handle_decision_feedback(self, peer: bytes, envelope: dict, binary: bytes | None) -> dict:
+        if binary is not None or self.task_coordinator is None or self.task_store is None:
+            return {"ok": False, "error": "private_feedback_unavailable"}
+        try:
+            task = self.task_store.get(envelope["payload"].get("task_id"))
+            if self._task_peer(task["robot_id"], task["route_ref"]) != peer:
+                raise TaskError("owner_mismatch")
+            return await self.task_coordinator.feedback(task["robot_id"], task["route_ref"], envelope["payload"])
+        except Exception as exc:
+            return {"ok": False, "error": getattr(exc, "code", "feedback_rejected")}
 
     @filter.on_llm_request()
     async def inject_ex_context(
@@ -566,6 +709,8 @@ class AstrBotEXInteractionPlugin(star.Star):
         event: AstrMessageEvent,
         req: ProviderRequest,
     ) -> None:
+        if getattr(req, "private_planning", False):
+            return
         try:
             context = await self.request_text("bridge.context.get", {})
         except ZmqTransportError as exc:
@@ -574,6 +719,60 @@ class AstrBotEXInteractionPlugin(star.Star):
         req.extra_user_content_parts.append(
             TextPart(text=self._format_context_for_llm(context)).mark_as_temp()
         )
+
+    async def _task_command(self, event: AstrMessageEvent, operation: str, task_id: str = "", text: str = "") -> None:
+        # Consume the real admin event: no public pipeline/final or start announcement.
+        event.should_call_llm(False)
+        event.stop_event()
+        try:
+            auth = self._task_authority(event)
+            if operation == "create":
+                from .task_contracts import require_text
+                require_text(text, "task_text", max_len=8192)
+                message_id = getattr(event.message_obj, "message_id", "")
+                request_id = hashlib.sha256(f"{auth.route_ref}:{message_id}".encode()).hexdigest() if message_id else uuid.uuid4().hex
+                self.begin_robot_task(auth, text, request_id)
+            elif operation == "update":
+                await self.task_coordinator.user_input(task_id, auth, text)
+            elif operation == "review":
+                await self.task_coordinator.review_resume(task_id, auth)
+            else:
+                await self.task_coordinator.cancel_task(task_id, auth)
+        except Exception as exc:
+            # Only fixed diagnostic codes, never provider/transport payloads or stacks.
+            code = getattr(exc, "code", "task_entry_unavailable")
+            known = {"unauthorized", "task_planning_disabled", "robot_owned", "owner_mismatch",
+                     "unknown_task", "ambiguous_task_peer", "task_peer_unavailable", "task_peer_conflict",
+                     "route_owner_mismatch", "untrusted_ex_event", "unresolved_execution",
+                     "turn_sync_failed", "task_inactive", "empty_string", "text_too_long", "invalid_type"}
+            event.set_result(MessageEventResult().message(
+                "AstrBotEX task: " + (code if code in known else "task_entry_rejected")))
+            event.stop_event()
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("ex_task")
+    async def ex_task(self, event: AstrMessageEvent) -> None:
+        parts = event.get_message_str().strip().split(maxsplit=1)
+        await self._task_command(event, "create", text=parts[1] if len(parts) == 2 else "")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("ex_task_update")
+    async def ex_task_update(self, event: AstrMessageEvent) -> None:
+        parts = event.get_message_str().strip().split(maxsplit=2)
+        await self._task_command(event, "update", parts[1] if len(parts) > 1 else "",
+                                 parts[2] if len(parts) > 2 else "")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("ex_task_review")
+    async def ex_task_review(self, event: AstrMessageEvent) -> None:
+        parts = event.get_message_str().strip().split(maxsplit=1)
+        await self._task_command(event, "review", parts[1] if len(parts) == 2 else "")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("ex_task_cancel")
+    async def ex_task_cancel(self, event: AstrMessageEvent) -> None:
+        parts = event.get_message_str().strip().split(maxsplit=1)
+        await self._task_command(event, "cancel", parts[1] if len(parts) == 2 else "")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("ex_status")
@@ -664,6 +863,10 @@ class AstrBotEXInteractionPlugin(star.Star):
         metadata = data.get("metadata", {})
         if not isinstance(metadata, dict):
             metadata = {}
+        if (metadata.get("visibility") == "private_planning"
+                or not PublicOutputRouter.permits_automatic_output(
+                    metadata.get("source"), task_id=metadata.get("task_id"))):
+            return {"ok": False, "error": "private_task_requires_framework_admission"}
         self._adapter.inject_message(
             {"text": text, "session_id": session_id, "metadata": metadata},
             peer,
@@ -1094,6 +1297,13 @@ class AstrBotEXInteractionPlugin(star.Star):
         )
 
     async def terminate(self) -> None:
+        if self.task_coordinator is not None:
+            await self.task_coordinator.close()
+            self.task_coordinator = None
+        if self.task_store is not None:
+            self.task_store.close()
+            self.task_store = None
+        self._task_routes.clear()
         for channel in (self.vision_channel, self.audio_channel, self.text_channel):
             if channel is not None:
                 await channel.close()

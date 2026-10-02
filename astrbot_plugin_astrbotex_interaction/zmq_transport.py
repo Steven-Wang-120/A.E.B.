@@ -24,7 +24,7 @@ class ZmqPeerUnavailable(ZmqTransportError):
     """Raised when no EX peer has completed the channel handshake."""
 
 
-class ZmqRequestTimeout(ZmqTransportError):
+class ZmqRequestTimeout(ZmqTransportError, TimeoutError):
     """Raised when a request receives no response before its deadline."""
 
 
@@ -99,8 +99,10 @@ class ZmqRouterChannel:
         self._receive_task: asyncio.Task[None] | None = None
         self._handler_tasks: set[asyncio.Task[None]] = set()
         self._pending: dict[str, asyncio.Future[ZmqReply]] = {}
+        self._pending_routes: dict[str, tuple[bytes, str]] = {}
         self._handlers: dict[str, Handler] = {}
         self._peer_last_seen: dict[bytes, float] = {}
+        self._peer_hello_seen: dict[bytes, float] = {}
         self._default_peer: bytes | None = None
         self._send_lock = asyncio.Lock()
         self._closed = False
@@ -116,6 +118,10 @@ class ZmqRouterChannel:
     @property
     def peer_count(self) -> int:
         return len(self._peer_last_seen)
+
+    def online_peers(self, *, max_age_sec: float = 30.0) -> tuple[bytes, ...]:
+        now = time.monotonic()
+        return tuple(peer for peer, seen in self._peer_hello_seen.items() if now - seen < max_age_sec)
 
     def register_handler(self, method: str, handler: Handler) -> None:
         if method in self._handlers:
@@ -157,11 +163,13 @@ class ZmqRouterChannel:
             if not future.done():
                 future.set_exception(ZmqTransportError("channel closed"))
         self._pending.clear()
+        self._pending_routes.clear()
 
         if self.socket is not None:
             self.socket.close(linger=0)
             self.socket = None
         self._peer_last_seen.clear()
+        self._peer_hello_seen.clear()
         self._default_peer = None
 
     async def request(
@@ -172,7 +180,10 @@ class ZmqRouterChannel:
         peer: bytes | None = None,
         binary: bytes | None = None,
         timeout_sec: float | None = None,
+        business_rejection_validator: Callable[[dict[str, Any]], None] | None = None,
     ) -> ZmqReply:
+        if business_rejection_validator is not None and method != "decision.goal.submit":
+            raise ValueError("business rejection is only supported for goal submit")
         target = peer or self._default_peer
         if target is None:
             raise ZmqPeerUnavailable(f"no peer connected to {self.name}")
@@ -187,6 +198,7 @@ class ZmqRouterChannel:
         )
         future: asyncio.Future[ZmqReply] = asyncio.get_running_loop().create_future()
         self._pending[message_id] = future
+        self._pending_routes[message_id] = (target, method)
         try:
             await self._send(target, envelope, binary)
             timeout = self.request_timeout_sec if timeout_sec is None else timeout_sec
@@ -197,12 +209,20 @@ class ZmqRouterChannel:
                     f"{self.name}/{method} timed out after {timeout:.1f}s"
                 ) from exc
             if not reply.payload.get("ok", True):
+                if business_rejection_validator is not None and reply.binary is None:
+                    try:
+                        business_rejection_validator(reply.payload)
+                    except (ValueError, TypeError):
+                        pass
+                    else:
+                        return reply
                 raise ZmqRemoteError(
                     str(reply.payload.get("error", "remote request failed"))
                 )
             return reply
         finally:
             self._pending.pop(message_id, None)
+            self._pending_routes.pop(message_id, None)
 
     async def send_event(
         self,
@@ -267,11 +287,16 @@ class ZmqRouterChannel:
 
             self._default_peer = peer
             self._peer_last_seen[peer] = time.time()
+            if envelope["method"] == "system.hello" and envelope["kind"] == "request":
+                self._peer_hello_seen[peer] = time.monotonic()
+            elif peer in self._peer_hello_seen:
+                self._peer_hello_seen[peer] = time.monotonic()
             kind = envelope["kind"]
             if kind == "response":
                 reply_to = envelope.get("reply_to")
                 future = self._pending.get(reply_to)
-                if future is not None and not future.done():
+                if (future is not None and not future.done()
+                        and self._pending_routes.get(reply_to) == (peer, envelope["method"])):
                     future.set_result(ZmqReply(envelope["payload"], binary))
                 continue
 
