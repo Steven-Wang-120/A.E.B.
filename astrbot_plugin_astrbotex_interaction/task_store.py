@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from typing import Any, Callable
@@ -43,7 +44,13 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS public_messages (
                 message_id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
                 payload TEXT NOT NULL, status TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS host_messages (
+                message_key TEXT PRIMARY KEY, operation TEXT NOT NULL,
+                task_id TEXT, status TEXT NOT NULL, public_claimed INTEGER NOT NULL DEFAULT 0);
         """)
+        # Upgrade the already-deployed/partially-created Host receipt table in place.
+        if "payload" not in {r[1] for r in self.db.execute("PRAGMA table_info(host_messages)")}:
+            self.db.execute("ALTER TABLE host_messages ADD COLUMN payload TEXT")
         if recover:
             with self.transaction():
                 for row in self.db.execute("SELECT data FROM tasks WHERE active=1").fetchall():
@@ -99,11 +106,86 @@ class TaskStore:
         with self._lock:
             return [json.loads(r[0]) for r in self.db.execute("SELECT data FROM tasks WHERE active=1")]
 
+    def routes(self) -> list[dict]:
+        with self._lock:
+            return [json.loads(r[0]) for r in self.db.execute("SELECT data FROM task_routes")]
+
+    def host_message(self, message_key: str) -> dict | None:
+        with self._lock:
+            row = self.db.execute("SELECT * FROM host_messages WHERE message_key=?", (message_key,)).fetchone()
+            return dict(row) if row else None
+
+    def claim_host_operation(self, message_key: str, operation: str, task_id: str, *,
+                             payload: dict | None = None) -> bool:
+        # Reserve before asynchronous update/cancel IO. A crash is unresolved, not a retry permit.
+        encoded = canonical(payload) if payload is not None else None
+        with self.transaction():
+            prior = self.host_message(message_key)
+            if prior:
+                if (prior["operation"] != operation or prior["task_id"] != task_id
+                        or prior["payload"] != encoded):
+                    raise TaskError("duplicate_request_id_conflict")
+                return False
+            self.db.execute("INSERT INTO host_messages(message_key,operation,task_id,status,payload) VALUES(?,?,?,?,?)",
+                            (message_key, operation, task_id, "claimed", encoded))
+            return True
+
+    def reserve_owned_host_operation(self, authority: TaskAuthority, message_key: str,
+                                     operation: str, text: str | None = None, *,
+                                     ex_session: str | None = None) -> tuple[dict, bool]:
+        from .task_contracts import require_id, require_text
+        authority.validate()
+        require_id(message_key, "message_key")
+        if operation not in {"update", "cancel", "review"} or (operation in {"cancel", "review"} and text is not None):
+            raise TaskError("invalid_host_operation")
+        if operation == "update":
+            require_text(text, "task_text", max_len=8192)
+        payload = {k: getattr(authority, k) for k in ("robot_id", "session_id", "user_id", "route_ref")}
+        payload.update(operation=operation, text=text)
+        with self.transaction():
+            prior = self.host_message(message_key)
+            if prior:
+                if prior["operation"] != operation or prior["payload"] != canonical(payload):
+                    raise TaskError("duplicate_request_id_conflict")
+                task = self.authorize(prior["task_id"], authority)
+                if prior["status"] != "accepted":
+                    raise TaskError("message_admission_unresolved")
+                return task, False
+            task = self.owned_active(authority)
+            if ex_session is not None and task["ex_session"] != ex_session:
+                raise TaskError("stale_ex_session")
+            self.db.execute("INSERT INTO host_messages(message_key,operation,task_id,status,payload) VALUES(?,?,?,?,?)",
+                            (message_key, operation, task["task_id"], "claimed", canonical(payload)))
+            return task, True
+
+    def finish_host_operation(self, message_key: str) -> None:
+        with self.transaction():
+            self.db.execute("UPDATE host_messages SET status='accepted' WHERE message_key=?", (message_key,))
+
+    def claim_host_reply(self, message_key: str) -> bool:
+        with self.transaction():
+            changed = self.db.execute("UPDATE host_messages SET public_claimed=1 WHERE message_key=? AND public_claimed=0",
+                                      (message_key,)).rowcount
+            return bool(changed)
+
+    def owned_active(self, authority: TaskAuthority) -> dict:
+        authority.validate()
+        owned = [t for t in self.active_tasks() if all(t[k] == getattr(authority, k)
+                 for k in ("robot_id", "session_id", "user_id", "route_ref"))]
+        if len(owned) != 1:
+            raise TaskError("owned_task_unavailable")
+        return owned[0]
+
     def _put(self, task: dict[str, Any]) -> None:
+        previous = self.get(task["task_id"])
+        if task == previous:
+            return
+        task["updated_at"] = time.time()
         self.db.execute("UPDATE tasks SET active=?, data=? WHERE task_id=?",
                         (int(task["active"]), canonical(task), task["task_id"]))
 
-    def create(self, authority: TaskAuthority, text: str, request_id: str) -> dict[str, Any]:
+    def create(self, authority: TaskAuthority, text: str, request_id: str, *,
+               provider_id: str = "", ex_session: str | None = None, revision: int = 0) -> dict[str, Any]:
         authority.validate()
         from .task_contracts import require_id, require_text
         require_id(request_id, "request_id")
@@ -111,6 +193,16 @@ class TaskStore:
         payload = {"robot_id": authority.robot_id, "session_id": authority.session_id,
                    "user_id": authority.user_id, "route_ref": authority.route_ref, "text": text}
         with self.transaction():
+            message = self.host_message(request_id)
+            if message:
+                if message["operation"] != "create":
+                    raise TaskError("duplicate_request_id_conflict")
+                if not message["task_id"]:
+                    raise TaskError("message_admission_unresolved")
+                receipt = self.request(request_id, payload)
+                if receipt is None or receipt["task_id"] != message["task_id"]:
+                    raise TaskError("message_admission_unresolved")
+                return self.authorize(message["task_id"], authority)
             old = self.request(request_id, payload)
             if old is not None:
                 return self.get(old["task_id"])
@@ -121,11 +213,15 @@ class TaskStore:
             task_id = uuid.uuid4().hex
             task = {**payload, "task_id": task_id, "active": True, "status": "planning",
                     "plan_revision": 0, "steps": [], "active_step": 0,
-                    "current_goal": None, "goal_revision": 0, "ex_session": None,
+                    "current_goal": None, "goal_revision": revision, "ex_session": ex_session,
+                    "provider_id": provider_id,
                     "last_event_seq": 0, "generation": 0, "turn_id": None,
                     "public_message_id": None, "needs_planning": True,
-                    "planning_failures": 0, "error_code": None}
+                    "planning_failures": 0, "error_code": None,
+                    "host_message_key": request_id, "updated_at": time.time()}
             self.db.execute("INSERT INTO tasks VALUES(?,?,1,?)", (task_id, authority.robot_id, canonical(task)))
+            self.db.execute("INSERT INTO host_messages(message_key,operation,task_id,status) VALUES(?,?,?,?)",
+                            (request_id, "create", task_id, "accepted"))
             self.db.execute("INSERT INTO requests VALUES(?,?,?,?)",
                             (request_id, task_id, canonical(payload), canonical({"task_id": task_id})))
             return task
@@ -178,6 +274,10 @@ class TaskStore:
                 require_text(text, "task_text", max_len=8192)
                 task["text"] = text
                 task["cancel_requested"] = False
+                if task["current_goal"]:
+                    task["replacement_requested"] = True
+                else:
+                    task.pop("replacement_requested", None)
             task["status"] = "canceling" if task["current_goal"] else "planning"
             task["needs_planning"] = not bool(task["current_goal"])
             task["planning_failures"] = 0

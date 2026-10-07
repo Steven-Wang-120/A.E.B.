@@ -204,7 +204,7 @@ class TaskCoordinator:
             prompt = json.dumps({"task": self.store.get(task_id), "decision_context": context}, ensure_ascii=False)
             if len(prompt.encode("utf-8")) > 262144:
                 raise TaskError("planning_context_too_large")
-            await run_planning_turn(self.host, self.provider_id, tools, prompt,
+            await run_planning_turn(self.host, task.get("provider_id") or self.provider_id, tools, prompt,
                                     max_rounds=self.max_rounds, timeout_sec=self.llm_timeout)
         except asyncio.CancelledError:
             def canceled(current):
@@ -475,10 +475,72 @@ class TaskCoordinator:
         self.wake(task_id)
         return state
 
+    @staticmethod
+    def _terminal_verified(fact: dict, state: dict) -> bool:
+        details = fact["details"]
+        evidence = details.get("terminal_evidence")
+        stop = details.get("stop_evidence")
+        execution = state["execution"]
+        if (not isinstance(evidence, dict) or not isinstance(stop, dict)
+                or stop.get("stopped") is not True or evidence.get("verified") is not True
+                or evidence.get("goal_id") != fact["goal_id"]
+                or type(evidence.get("goal_revision")) is not int
+                or evidence["goal_revision"] != fact["goal_revision"]
+                or state["active_goal_id"] is not None or state["pending_goal_id"] is not None
+                or execution.get("gate_open") is not False or execution.get("blocked") is not False
+                or execution.get("internal_phase") != "idle" or execution.get("unresolved") != []
+                or execution.get("stop_proven") is not True):
+            return False
+        dispatcher = evidence.get("dispatcher_epoch")
+        proof = evidence.get("stop_proof_epoch")
+        if (type(dispatcher) is not int or type(proof) is not int or not 0 <= dispatcher <= proof
+                or type(execution.get("dispatcher_epoch")) is not int
+                or type(execution.get("stop_proof_epoch")) is not int
+                or execution["dispatcher_epoch"] != dispatcher or execution["stop_proof_epoch"] != proof):
+            return False
+        commands = evidence.get("commands")
+        if not isinstance(commands, list):
+            return False
+        ids = set()
+        for command in commands:
+            if (not isinstance(command, dict) or not isinstance(command.get("command_id"), str)
+                    or not command["command_id"] or command["command_id"] in ids
+                    or command.get("ex_session") != fact["ex_session"]
+                    or command.get("goal_id") != fact["goal_id"]
+                    or type(command.get("goal_revision")) is not int
+                    or command["goal_revision"] != fact["goal_revision"]
+                    or type(command.get("event_seq")) is not int or command["event_seq"] <= 0
+                    or not isinstance(command.get("status"), str)
+                    or command["status"] not in {"succeeded", "rejected", "canceled", "failed"}):
+                return False
+            ids.add(command["command_id"])
+            if command["status"] in {"canceled", "failed"}:
+                command_stop = command.get("stop_evidence")
+                if (not isinstance(command_stop, dict) or command_stop.get("stopped") is not True
+                        or not isinstance(command_stop.get("source"), str) or not command_stop["source"]
+                        or not isinstance(command_stop.get("reference"), str) or not command_stop["reference"]):
+                    return False
+        # Decision rejection can happen before dispatch: no physical FAILED row exists.
+        # All other failed Goals still need the original, stopped Action failure facts.
+        if fact["status"] == "failed" and (fact["reason_code"] not in {
+                "low_confidence", "backend_requested_replan"}
+                or any(command["status"] == "failed" for command in commands)):
+            failure = details.get("failure_evidence")
+            if (not isinstance(failure, dict) or failure.get("verified") is not True
+                    or failure.get("goal_id") != fact["goal_id"]
+                    or type(failure.get("goal_revision")) is not int
+                    or failure["goal_revision"] != fact["goal_revision"]
+                    or not isinstance(failure.get("commands"), list) or not failure["commands"]):
+                return False
+            if any(command not in commands or command.get("status") != "failed"
+                   for command in failure["commands"]):
+                return False
+        return True
+
     @classmethod
     def _apply_state(cls, task: dict, state: dict) -> None:
         goal = task["current_goal"]
-        if not goal:
+        if not goal or state["ex_session"] != task["ex_session"]:
             return
         execution = state["execution"]
         summaries = execution.get("goal_summaries", [])
@@ -503,14 +565,35 @@ class TaskCoordinator:
         for seq in sorted(facts):
             cls._apply_fact(task, facts[seq])
         fact = goal.get("last_feedback")
+        if (fact and fact["ex_session"] == state["ex_session"]
+                and fact["event_seq"] <= state["event_seq"]):
+            task["last_event_seq"] = max(task["last_event_seq"], fact["event_seq"])
+        # Normal running commands also lack stop proof; only blocked/uncertain
+        # execution of the current Goal fences planning, without a terminal fact.
+        unresolved = execution.get("unresolved", [])
+        uncertain = (execution.get("stop_proven") is False and isinstance(unresolved, list)
+            and any(isinstance(row, dict) and row.get("status") in {"unknown", "timed_out", "failed"}
+                    for row in unresolved))
+        if (goal["payload"]["goal_id"] in {state["active_goal_id"], state["pending_goal_id"]}
+                and (execution.get("blocked") is True
+                     or execution.get("internal_phase") == "blocked" or uncertain)):
+            if task["status"] != "resume_review":
+                task["generation"] += 1
+            task.update(status="resume_review", needs_planning=False, turn_id=None)
+            return
         if (not fact or fact["ex_session"] != state["ex_session"]
                 or fact["event_seq"] > state["event_seq"]):
             return
-        task["last_event_seq"] = max(task["last_event_seq"], fact["event_seq"])
-        if goal["payload"]["goal_id"] in {state["active_goal_id"], state["pending_goal_id"]}:
-            return
         index = task["active_step"]
         status = fact["status"]
+        if status in {"unknown", "timed_out"} or (status in {"failed", "rejected", "canceled"}
+                and not cls._terminal_verified(fact, state)):
+            if task["status"] != "resume_review":
+                task["generation"] += 1
+            task.update(status="resume_review", needs_planning=False, turn_id=None)
+            return
+        if goal["payload"]["goal_id"] in {state["active_goal_id"], state["pending_goal_id"]}:
+            return
         if status == "succeeded":
             evidence = fact["details"].get("completion_evidence", {})
             required = goal["payload"]["completion"].get("required_success_actions", [])
@@ -540,6 +623,10 @@ class TaskCoordinator:
         if task.get("cancel_requested"):
             task.update(active=False, status="canceled", needs_planning=False)
             return
+        if status == "canceled" and not task.get("replacement_requested"):
+            task.update(status="waiting_input", needs_planning=False)
+            return
+        task.pop("replacement_requested", None)
         # A restarted task remains user-reviewed even after fetching the ledger.
         if task["status"] not in {"resume_review", "lease_lost", "waiting_input"}:
             task["status"] = "planning"
