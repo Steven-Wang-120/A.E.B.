@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from astrbot.core.provider.provider import Provider
+
 from astrbot_plugin_astrbotex_interaction import main as plugin_module
 from astrbot_plugin_astrbotex_interaction.output_router import PublicOutputRouter
 from astrbot_plugin_astrbotex_interaction.task_coordinator import TaskCoordinator
@@ -41,6 +43,15 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.task_store = TaskStore(str(Path(self.tmp.name) / "task.db"))
         self.plugin.text_channel = SimpleNamespace(online_peers=lambda: (b"ex-trusted",))
         self.ex = FakeDecision()
+        from astrbot_plugin_astrbotex_interaction.tests.test_chat_tasks import capabilities, provider
+        self.plugin.task_provider_id = "offline"
+        self.offline_provider = provider()
+        self.plugin.context.get_provider_by_id = lambda name: self.offline_provider
+        async def request(method, payload, **kwargs):
+            if method == "decision.capabilities.get":
+                return capabilities(self.ex)
+            return await self.ex("robot-from-config", "route", method, payload)
+        self.plugin.request_text = request
         self.coordinator = TaskCoordinator(self.plugin.task_store, self.ex,
             router=PublicOutputRouter(self.plugin.task_store, self.send), turn_sync=self.sync_turn)
         self.plugin.task_coordinator = self.coordinator
@@ -73,10 +84,8 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
         for name in ("ex_task", "ex_task_update", "ex_task_review", "ex_task_cancel"):
             md = star_handlers_registry.get_handler_by_full_name(f"{plugin_module.__name__}_{name}")
             self.assertIsNotNone(md)
-            permission = next(f for f in md.event_filters if isinstance(f, PermissionTypeFilter))
-            self.assertEqual(permission.permission_type, PermissionType.ADMIN)
-            self.assertFalse(permission.filter(event("text", role="member"), {}))
-            self.assertTrue(permission.filter(event("text"), {}))
+            permissions = [f for f in md.event_filters if isinstance(f, PermissionTypeFilter)]
+            self.assertEqual(permissions, [])
             command = next(f for f in md.event_filters if isinstance(f, CommandFilter))
             request = event(name + " task-id all remaining words")
             self.assertTrue(command.filter(request, {}))
@@ -95,7 +104,7 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(route["origin"], item.unified_msg_origin)
         self.assertEqual(self.public, [])
 
-    async def test_default_off_and_non_admin_guard_no_payload_identity(self):
+    async def test_explicit_off_and_nonadmin_admission_ignores_payload_identity(self):
         self.plugin.task_planning_enabled = False
         item = self.create_event()
         await self.plugin.ex_task(item)
@@ -104,8 +113,11 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
         item = event("ex_task spoof robot session user", role="member")
         item.message_obj.raw_message = {"authorized": True, "user_id": "admin", "robot_id": "spoof"}
         await self.plugin.ex_task(item)
-        self.assertIn("unauthorized", item.get_result().get_plain_text())
-        self.assertEqual(self.plugin.task_store.active_tasks(), [])
+        task = self.plugin.task_store.active_tasks()[0]
+        self.assertEqual(task["user_id"], item.get_sender_id())
+        self.assertEqual(task["robot_id"], "robot-from-config")
+        self.assertEqual(task["session_id"], item.unified_msg_origin)
+        self.assertEqual(item.get_result().get_plain_text(), "")
 
     async def test_other_session_user_cannot_update_review_cancel_or_rebind(self):
         task, item = await self.create()
@@ -163,7 +175,7 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.plugin.task_store.get(task["task_id"])["text"], "changed target with spaces")
         self.assertEqual(self.turns[-1]["operation"], "invalidate")
         self.assertEqual(update.get_result().get_plain_text(), "")
-        review = event("ex_task_review " + task["task_id"])
+        review = event("ex_task_review " + task["task_id"], role="member")
         await self.plugin.ex_task_review(review)
         self.assertEqual(review.get_result().get_plain_text(), "")
         canceled = event("ex_task_cancel " + task["task_id"])
@@ -180,6 +192,48 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
                 reopened.bind_route(TaskAuthority(task["robot_id"], task["session_id"], "other", task["route_ref"], True), b"ex-trusted")
         finally:
             reopened.close()
+
+    async def test_owner_commands_disabled_and_provider_unavailable_keep_controls(self):
+        from unittest.mock import patch
+        task, _ = await self.create()
+        from astrbot_plugin_astrbotex_interaction.tests.test_chat_tasks import capabilities
+        disabled = capabilities(self.ex)
+        disabled["execution"].update(mode="disabled", execution_allowed=False, runtime_state="paused")
+        self.plugin.context.get_provider_by_id = lambda name: None
+        with patch.object(self.plugin, "_capabilities", return_value=disabled):
+            create = event("ex_task blocked new work")
+            await self.plugin.ex_task(create)
+            self.assertIn("decision_execution_unavailable", create.get_result().get_plain_text())
+            update = event("ex_task_update " + task["task_id"] + " owner replacement")
+            await self.plugin.ex_task_update(update)
+            self.assertEqual(update.get_result().get_plain_text(), "")
+            self.assertEqual(self.plugin.task_store.get(task["task_id"])["text"], "owner replacement")
+            foreign = event("ex_task_cancel " + task["task_id"], user="foreign-member", role="member")
+            await self.plugin.ex_task_cancel(foreign)
+            self.assertIn("owner_mismatch", foreign.get_result().get_plain_text())
+            review = event("ex_task_review " + task["task_id"])
+            await self.plugin.ex_task_review(review)
+            self.assertEqual(review.get_result().get_plain_text(), "")
+            cancel = event("ex_task_cancel " + task["task_id"])
+            await self.plugin.ex_task_cancel(cancel)
+            self.assertEqual(cancel.get_result().get_plain_text(), "")
+            self.assertFalse(self.plugin.task_store.get(task["task_id"])["active"])
+            generation = self.plugin.task_store.get(task["task_id"])["generation"]
+            await self.plugin.ex_task_cancel(event("ex_task_cancel " + task["task_id"]))
+            self.assertEqual(self.plugin.task_store.get(task["task_id"])["generation"], generation)
+        self.assertEqual(self.ex.goals, {})
+        self.assertFalse(disabled["execution"]["execution_allowed"])
+
+    async def test_provider_unavailable_denies_new_create_but_owner_controls_remain(self):
+        task, _ = await self.create()
+        self.plugin.context.get_provider_by_id = lambda name: None
+        create = event("ex_task another task")
+        await self.plugin.ex_task(create)
+        self.assertIn("task_provider_unavailable", create.get_result().get_plain_text())
+        cancel = event("ex_task_cancel " + task["task_id"])
+        await self.plugin.ex_task_cancel(cancel)
+        self.assertEqual(cancel.get_result().get_plain_text(), "")
+        self.assertFalse(self.plugin.task_store.get(task["task_id"])["active"])
 
     async def test_real_public_Host_entry_context_tools_and_silent_finish(self):
         from astrbot.api.star import Context

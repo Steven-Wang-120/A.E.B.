@@ -69,7 +69,7 @@ class TurnSyncTests(CoordinatorFixture):
                     [{"text": "old turn"}, {"outcome": "waiting_input"}])
         self.coordinator.host = Host()
         old = asyncio.create_task(self.coordinator._planning_worker(self.task["task_id"]))
-        await started.wait()
+        await asyncio.wait_for(started.wait(), 2.0)
         old_generation = self.current()["generation"]
         await self.coordinator.user_input(self.task["task_id"], authority(), "new task")
         self.assertEqual(self.turns[-1]["operation"], "invalidate")
@@ -105,7 +105,7 @@ class TurnSyncTests(CoordinatorFixture):
                 await asyncio.Event().wait()
         self.coordinator.host = Host()
         worker = asyncio.create_task(self.coordinator._planning_worker(self.task["task_id"]))
-        await started.wait()
+        await asyncio.wait_for(started.wait(), 2.0)
         generation = self.current()["generation"]
         worker.cancel()
         with self.assertRaises(asyncio.CancelledError):

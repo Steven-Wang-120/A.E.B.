@@ -369,7 +369,12 @@ class PluginChannelTests(unittest.IsolatedAsyncioTestCase):
             tool = next(item for item in self.context.tools if item.name == tool_name)
             await tool.call(None)
 
-        async def fake_request_text(method: str, payload: dict) -> dict:
+        async def fake_request_text(method: str, payload: dict, **kwargs) -> dict:
+            if method == "decision.capabilities.get":
+                self.assertEqual(payload, {"schema_version": 1})
+                return {"schema_version": 1, "ex_session": "ex1", "revision": 0, "catalog_revision": 0,
+                        "control_mode": "legacy", "execution": {"mode": "disabled", "execution_allowed": False,
+                        "runtime_state": "idle"}, "actions": []}
             self.assertEqual(method, "bridge.context.get")
             self.assertEqual(payload, {})
             return {
@@ -387,7 +392,10 @@ class PluginChannelTests(unittest.IsolatedAsyncioTestCase):
 
         self.plugin.request_text = fake_request_text
         request = FakeProviderRequest()
-        await self.plugin.inject_ex_context(None, request)
+        from astrbot_plugin_astrbotex_interaction.tests.test_task_admission import event
+        self.plugin.text_channel.online_peers = lambda: (b"trusted",)
+        await self.plugin.inject_ex_context(event("normal chat"), request)
+        self.assertEqual(len(request.extra_user_content_parts), 1)
         injected_text = "\n".join(
             part.text for part in request.extra_user_content_parts
         )

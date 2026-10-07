@@ -53,7 +53,8 @@ class IsolationTests(CoordinatorFixture):
                                 [{"text": "stale public"}, {"outcome": "waiting_input"}])
         tools = PlanningTools(self.coordinator, self.router, self.turn(), self.ex.context)
         future = asyncio.create_task(run_planning_turn(LateHost(), "provider", tools, "task"))
-        await started.wait()
+        # A setup/import failure must surface, not strand the test on an unset Event.
+        await asyncio.wait_for(started.wait(), 2.0)
         self.store.invalidate(self.task["task_id"], authority(), "changed")
         release.set()
         with self.assertRaisesRegex(TaskError, "stale_generation"):

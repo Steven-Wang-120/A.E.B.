@@ -37,10 +37,14 @@ class FakeDecision:
         self.resync = False
 
     def state(self):
+        execution = {"feedback": self.fact} if self.fact else {}
+        if self.fact and self.fact["status"] in {"failed", "canceled", "rejected"} and not self.active:
+            execution.update(gate_open=False, blocked=False, internal_phase="idle", unresolved=[],
+                             stop_proven=True, dispatcher_epoch=2, stop_proof_epoch=2)
         return {"schema_version": 1, "ex_session": "ex1", "revision": self.context["revision"],
                 "active_goal_id": self.active, "active_phase": "active" if self.active else None,
                 "pending_goal_id": None, "pending_phase": None,
-                "execution": {"feedback": self.fact} if self.fact else {}, "event_seq": len(self.events)}
+                "execution": execution, "event_seq": len(self.events)}
 
     async def __call__(self, robot, route, method, payload):
         self.calls.append((robot, route, method, copy.deepcopy(payload)))
@@ -78,8 +82,18 @@ class FakeDecision:
         if status == "succeeded":
             details["completion_evidence"] = {"verified": verified, "goal_id": goal_id,
                 "goal_revision": current["revision"], "succeeded_actions": [ACTION]}
-        if status == "canceled":
+        if status in {"failed", "canceled", "rejected"}:
             details["stop_evidence"] = {"stopped": True}
+            command = {"command_id": f"physical-{seq}", "ex_session": "ex1", "goal_id": goal_id,
+                       "goal_revision": current["revision"], "event_seq": seq, "status": status}
+            if status in {"failed", "canceled"}:
+                command["stop_evidence"] = {"stopped": True, "source": "mock", "reference": f"stop-{seq}"}
+            details["terminal_evidence"] = {"verified": verified, "goal_id": goal_id,
+                "goal_revision": current["revision"], "dispatcher_epoch": 2, "stop_proof_epoch": 2,
+                "commands": [command]}
+            if status == "failed":
+                details["failure_evidence"] = {"verified": verified, "goal_id": goal_id,
+                    "goal_revision": current["revision"], "commands": [copy.deepcopy(command)]}
         fact = {"schema_version": 1, "ex_session": "ex1", "task_id": task["task_id"],
                 "goal_id": goal_id, "goal_revision": current["revision"], "event_seq": seq,
                 "status": status, "reason_code": "", "details": details}
