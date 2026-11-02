@@ -1,0 +1,87 @@
+{
+  "task_id": "B06",
+  "title": "AEB 独立 control 通道",
+  "status": "PASS",
+  "scope": "real_zmq_loopback: real pyzmq ROUTER bound on an ephemeral port and a real DEALER peer with an explicit IDENTITY. No model or device involved.",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "code_revision_short": "3569ab4",
+  "environment": {
+    "os": "Windows 11 (10.0.26200)",
+    "python_primary": "3.12 (C:/Users/17088/AppData/Local/Programs/Python/Python312/python.exe)",
+    "python_alt": "3.13.12 (C:/Users/17088/.workbuddy-ai/binaries/python/versions/3.13.12/python.exe)",
+    "worktree": "D:/Code/A.E.B-work/upper-b04-b06",
+    "branch": "upper/B04-B06",
+    "host_version": "AstrBot 4.26.7 present at D:/Code/AstrBot-latest (read-only, not on PYTHONPATH)",
+    "dirty_tree": "?? port_artifacts/"
+  },
+  "changed_files": [
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/control_channel.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/tests/test_control_channel.py",
+      "change": "added"
+    }
+  ],
+  "interfaces": {
+    "ControlChannel(*, peer_id, robot_id, bind_host='127.0.0.1', port=8769, request_timeout_sec, max_message_bytes, channel_factory, hasher, on_status)": "constructor never binds",
+    "start() / close()": "repeatable; close cancels pending waits, releases the socket and frees the port",
+    "capabilities(peer, *, refresh, timeout_sec) -> summary": "upper.capabilities.get; cached per peer+ex_session with a 30 s TTL; ControlError on timeout/unsupported/stale",
+    "inject(peer, batch, *, timeout_sec) -> DeliveryOutcome": "re-verifies schema/version/bytes/ordinals/hash/robot/session, then upper.steps.inject",
+    "resolve_peer(peer)": "explicit trusted peer only; default_peer is never consulted",
+    "invalidate(peer=None)": "drops the capability cache",
+    "DeliveryOutcome.to_dict()": "status, batch_id, request_id, payload_hash, error_code, sent, duplicate, detail; contains no segment text"
+  },
+  "dependencies": [
+    {
+      "task": "B00",
+      "need": "aeb.upper_steps.v1 envelope and the error-code table",
+      "state": "envelope shape and codes re-declared locally from C01; payload_hash() is injectable for B00's implementation"
+    },
+    {
+      "task": "B09",
+      "need": "EX DEALER that answers system.hello, upper.capabilities.get and upper.steps.inject with batch_id/request_id/payload_hash/phase",
+      "state": "peer side not implemented here; LoopbackExPeer in the test file is the reference implementation handed over"
+    }
+  ],
+  "entry_points": "None yet. B10 constructs ControlChannel with B01's host/port/peer_id/robot_id, calls start() during initialise and close() during terminate.",
+  "tests": {
+    "new": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_control_channel.py -v -> 18 tests OK",
+    "regression": [
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_plugin_channels.py -v -> NOT_RUN (import error, see known_issues)",
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_zmq_transport.py -v -> 2 tests OK"
+    ]
+  },
+  "evidence": {
+    "dir": "port_artifacts/upper/B06/20261102T1505Z",
+    "files": [
+      "test_control_channel.log",
+      "test_plugin_channels.log",
+      "baseline_and_transport_regression.log",
+      "handoff.json",
+      "results.json",
+      "commands.log"
+    ],
+    "layers": [
+      "real_zmq_loopback"
+    ],
+    "recorded": {
+      "ephemeral_ports": "allocated per test via socket bind(0)",
+      "frame_metadata": "asserted in-process: peer identity, channel=control, method, reply_to correlation, payload equality"
+    }
+  },
+  "known_issues": [
+    "test_plugin_channels.py cannot run in this environment: it imports astrbot_plugin_astrbotex_interaction.main, which needs the astrbot package. The same import error occurs on the untouched D:/Code/A.E.B worktree, so it is an environment gap, not a regression. B11 must run it inside a Host-capable image.",
+    "test_planning_tools.py also fails identically on the baseline (1 failure, 9 errors) for the same missing-astrbot reason; recorded in baseline_and_transport_regression.log.",
+    "Two diagnostic codes are additions to the C01 table: peer_unavailable and capabilities_unavailable. They are raised, never recorded as a delivery phase, and are flagged for the B00 owner.",
+    "ControlChannel also enforces 'a registered batch is injected once' in memory. A restart clears it, so cross-process duplicate protection still relies on B04's terminal batch state."
+  ],
+  "consumers_to_retest": [
+    "B05 (capabilities/inject contract)",
+    "B09 (peer implementation against the same fixtures)",
+    "B10 (lifecycle, on_status sink)",
+    "B11 (loopback peer reuse)"
+  ],
+  "rollback": "Leave control_enabled=false; the old text/audio/vision sockets are untouched and the plugin still initialises when pyzmq is missing (start() raises backend_unsupported instead of crashing)."
+}

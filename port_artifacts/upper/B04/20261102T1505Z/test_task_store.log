@@ -1,0 +1,13 @@
+$ python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_task_store.py -v
+test_CAS_intents_and_P07_generation (test_task_store.TaskStoreTests.test_CAS_intents_and_P07_generation) ... ok
+test_P05_owner_and_creation_idempotency (test_task_store.TaskStoreTests.test_P05_owner_and_creation_idempotency) ... ok
+test_P08_restart_review_no_replay (test_task_store.TaskStoreTests.test_P08_restart_review_no_replay) ... ok
+test_atomic_creation_across_connections (test_task_store.TaskStoreTests.test_atomic_creation_across_connections) ... ok
+test_reconcile_cannot_regress_or_jump_unapplied_cursor (test_task_store.TaskStoreTests.test_reconcile_cannot_regress_or_jump_unapplied_cursor) ... ok
+test_transaction_rollback_and_defensive_copy (test_task_store.TaskStoreTests.test_transaction_rollback_and_defensive_copy) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.141s
+
+OK
+EXIT=0

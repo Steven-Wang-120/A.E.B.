@@ -1,0 +1,83 @@
+{
+  "task_id": "B06",
+  "title": "AEB 独立 control 通道",
+  "status": "PASS",
+  "scope": "real_zmq_loopback: real pyzmq ROUTER on an ephemeral port + real DEALER peer with an explicit IDENTITY. No model, device or external network.",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "environment": {
+    "os": "Windows 11 (10.0.26200)",
+    "python_primary": "3.12 at C:/Users/17088/AppData/Local/Programs/Python/Python312/python.exe (pyzmq 27.1.0)",
+    "python_alt": "3.13.12 at C:/Users/17088/.workbuddy-ai/binaries/python/versions/3.13.12/python.exe (no pyzmq -> socket suites cannot run)",
+    "worktree": "D:/Code/A.E.B-work/upper-b04-b06",
+    "branch": "upper/B04-B06",
+    "host_version": "AstrBot 4.26.7 at D:/Code/AstrBot-latest (read-only; astrbot package not importable here)",
+    "upstream_contract": "B00 upper_contracts.py read from D:/Code/A.E.B-work/upper-b00-b03 @ 384eec0; not copied into this branch"
+  },
+  "changed_files": [
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/control_channel.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/tests/test_control_channel.py",
+      "change": "added"
+    }
+  ],
+  "interfaces": {
+    "ControlChannel(*, peer_id, robot_id, bind_host='127.0.0.1', port=8769, request_timeout_sec, max_message_bytes, channel_factory, hasher, on_status)": "constructor never binds",
+    "start() / close()": "repeatable; close cancels pending waits, releases the socket, frees the port",
+    "capabilities(peer, *, refresh, timeout_sec)": "upper.capabilities.get; cached per peer+ex_session, 30 s TTL, dropped on mismatch",
+    "inject(peer, batch, *, timeout_sec) -> DeliveryOutcome": "accepts B00's InjectionBatch (to_dict/payload_hash) or B04's frozen projection; re-verifies everything before sending",
+    "resolve_peer(peer)": "explicit trusted peer only; default_peer never consulted",
+    "DeliveryOutcome.to_dict()": "status, batch_id, request_id, payload_hash, error_code, sent, duplicate, detail; no segment text"
+  },
+  "dependencies": [
+    {
+      "task": "B00",
+      "need": "aeb.upper_steps.v1 envelope, error table, InjectionBatch",
+      "state": "batch adapter added; error codes aligned except the two diagnostics listed below"
+    },
+    {
+      "task": "B09",
+      "need": "EX DEALER answering hello / upper.capabilities.get / upper.steps.inject",
+      "state": "LoopbackExPeer in the test file is the handed-over reference peer"
+    }
+  ],
+  "entry_points": "B10 constructs ControlChannel from B01's config, start() in initialize, close() in terminate.",
+  "tests": {
+    "new": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_control_channel.py -v -> 19 OK",
+    "regression": [
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_zmq_transport.py -v -> 2 OK",
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_plugin_channels.py -v -> NOT_RUN (see known_issues)"
+    ]
+  },
+  "evidence": {
+    "dir": "port_artifacts/upper/B06/20261102T1530Z",
+    "files": [
+      "test_control_channel.log",
+      "test_zmq_transport.log",
+      "test_plugin_channels.log",
+      "baseline_and_transport_regression.log",
+      "handoff.json",
+      "results.json",
+      "commands.log"
+    ],
+    "layers": [
+      "real_zmq_loopback"
+    ]
+  },
+  "known_issues": [
+    "test_plugin_channels.py cannot run here: it imports main.py, which needs the astrbot package. The untouched D:/Code/A.E.B worktree fails identically, so this is an environment gap, not a regression. B11 must run it in a Host-capable image.",
+    "test_planning_tools.py fails identically on the baseline (1 failure / 9 errors) for the same reason.",
+    "peer_unavailable and capabilities_unavailable are additions to B00's ten-code table. They are raised, never recorded as a delivery phase.",
+    "The in-memory 'inject a batch once' guard resets on restart; cross-process protection still relies on B04's terminal batch state.",
+    "B00 suggested timeout be reported as receipt_for(batch, 'rejected', 'delivery_unknown'). This implementation reports phase delivery_unknown with error_code delivery_unknown, matching C01 §5 rather than that suggestion; flagged in the discussion area."
+  ],
+  "consumers_to_retest": [
+    "B05",
+    "B09",
+    "B10",
+    "B11"
+  ],
+  "rollback": "Leave control_enabled=false; the old text/audio/vision sockets are untouched and a missing pyzmq only disables this channel."
+}

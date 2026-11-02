@@ -1,0 +1,48 @@
+{
+  "task_id": "B05",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "run_id": "20261102T1530Z",
+  "suites": [
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_pipeline.py -v",
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "status": "PASS",
+      "layer": "unit_fake"
+    },
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_output_isolation.py -v",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "status": "PASS",
+      "layer": "unit_fake"
+    },
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_public_output_router.py -v",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "status": "PASS",
+      "layer": "unit_fake",
+      "note": "legacy router regression"
+    }
+  ],
+  "acceptance_checks": {
+    "three_routes_x_two_sources": "PASS - public 1/0/1, control batch 0/1/1, each exit at most once; onebot and astrbotex voice identical",
+    "send_count_2_of_3": "PASS - payload ordinals [0,1]; segment 3 pending in the DB",
+    "sentinel_zero_leak": "PASS - 3 sentinels x 5 public surfaces (OneBot send, Host auto reply, TTS request, TTS play, interaction.reply) all 0 for every route",
+    "public_text_zero_in_control": "PASS",
+    "duplicate_callback": "PASS - 1 classify / 1 generate / 1 public send / 1 batch after 4 calls",
+    "send_timeout": "PASS - public reply delivery_unknown once, never re-sent",
+    "stale_session": "PASS - rejected/session_mismatch recorded, public sent once, no retry",
+    "late_result_after_close": "PASS - generation_stale, zero sends, plan persisted",
+    "old_task_busy": "PASS - control refused, no batch row, public sent once, zero sentinel leaks",
+    "invalid_probabilities_and_route_mismatch": "PASS - zero generate calls, zero sends",
+    "b00_trusted_input_shape": "PASS - input_key stored verbatim, ex_session taken from the trusted input (no capabilities read)"
+  }
+}

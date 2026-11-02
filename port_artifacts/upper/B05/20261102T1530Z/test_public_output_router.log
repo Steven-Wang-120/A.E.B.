@@ -1,0 +1,12 @@
+$ python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_public_output_router.py -v
+test_O02_message_identity_and_dedup (test_public_output_router.PublicRouterTests.test_O02_message_identity_and_dedup) ... ok
+test_O06_TTS_failure_does_not_retry_goal (test_public_output_router.PublicRouterTests.test_O06_TTS_failure_does_not_retry_goal) ... ok
+test_O07_two_session_routes (test_public_output_router.PublicRouterTests.test_O07_two_session_routes) ... ok
+test_O08_old_generation_and_unverified_completed (test_public_output_router.PublicRouterTests.test_O08_old_generation_and_unverified_completed) ... ok
+test_automatic_output_gate_preserves_public_chat (test_public_output_router.PublicRouterTests.test_automatic_output_gate_preserves_public_chat) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.191s
+
+OK
+EXIT=0

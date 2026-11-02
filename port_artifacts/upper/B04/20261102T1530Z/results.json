@@ -1,0 +1,36 @@
+{
+  "task_id": "B04",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "run_id": "20261102T1530Z",
+  "suites": [
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_store.py -v",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "status": "PASS",
+      "layer": "unit_fake"
+    },
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_task_store.py -v",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "status": "PASS",
+      "layer": "unit_fake",
+      "note": "legacy regression"
+    }
+  ],
+  "acceptance_checks": {
+    "three_segments_send_two_restart_identical": "PASS - identical segment ids, frozen payload and hash after reopen; third segment pending",
+    "20_concurrent_duplicate_claims": "PASS - 1 plan, 1 batch, 3 segments",
+    "distinct_messages_same_text": "PASS - two plans, equal result_hash",
+    "send_exception_unknown_zero_resend": "PASS - terminal delivery_unknown, re-reserve returns the same batch id, injected transition refused",
+    "legacy_tables_unchanged": "PASS - task rows/steps identical, integrity_check=ok, legacy recover still yields resume_review",
+    "subprocess_crash": "PASS - os._exit(9) child; reopen gives delivery_unknown, fence=1, restart_unresolved; second restart does not escalate",
+    "invalid_transitions_stale_generation": "PASS - stale_generation / invalid_transition / id_conflict / receipt mismatch all raised with state intact",
+    "b00_input_key_claim": "PASS - a caller-supplied framework input_key is stored verbatim and claimed by primary key"
+  }
+}
