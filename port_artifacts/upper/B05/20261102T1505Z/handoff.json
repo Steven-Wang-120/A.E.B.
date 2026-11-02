@@ -1,0 +1,112 @@
+{
+  "task_id": "B05",
+  "title": "输入流水线与双路输出",
+  "status": "PASS",
+  "scope": "unit_fake: real SQLite/UpperStore + real UpperOutputRouter; B03 models, B01 settings/catalog and both senders are substitutes. Real Host event wiring belongs to B10/B11.",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "code_revision_short": "3569ab4",
+  "environment": {
+    "os": "Windows 11 (10.0.26200)",
+    "python_primary": "3.12 (C:/Users/17088/AppData/Local/Programs/Python/Python312/python.exe)",
+    "python_alt": "3.13.12 (C:/Users/17088/.workbuddy-ai/binaries/python/versions/3.13.12/python.exe)",
+    "worktree": "D:/Code/A.E.B-work/upper-b04-b06",
+    "branch": "upper/B04-B06",
+    "host_version": "AstrBot 4.26.7 present at D:/Code/AstrBot-latest (read-only, not on PYTHONPATH)",
+    "dirty_tree": "?? port_artifacts/"
+  },
+  "changed_files": [
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/upper_pipeline.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/tests/test_upper_pipeline.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/tests/test_upper_output_isolation.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/output_router.py",
+      "change": "modified",
+      "note": "appended UpperOutputRouter and upper_* source constants; PublicOutputRouter untouched"
+    }
+  ],
+  "interfaces": {
+    "UpperPipeline.process(trusted, *, public_sender, peer) -> result": "returns handled, suppress_default, error_code, plan_id (+ route, control_status, public_sent, duplicate, control_error, public_error)",
+    "argmax_route(probabilities) -> route": "framework-side decision; C01 tie order speech_only > speech_and_action > action_only",
+    "UpperOutputRouter.permits_public_output(source, *, plan_id)": "True only for upper_public without a plan_id",
+    "UpperOutputRouter.permits_automatic_output(source, *, plan_id)": "Host output-hook gate; False for every upper_* source and for any plan_id",
+    "UpperOutputRouter.claim(*, source, plan_id, reply_id, request_id)": "raises source_not_public / invalid_source instead of silently dropping",
+    "UpperOutputRouter.emit_public(plan_id, sender) -> dict": "claim -> record sending -> await sender(text) -> record sent/delivery_unknown",
+    "result_factory": "injectable so B10 can pass B00's UpperProcessResult; default returns a mapping with the four contracted keys"
+  },
+  "dependencies": [
+    {
+      "task": "B00",
+      "need": "TrustedUpperInput fields (trusted, sender, platform, origin, source_message_id, robot_id, user_id, session_id, input_text, route_ref) and UpperResult fields",
+      "state": "absent; consumed through the documented field surface"
+    },
+    {
+      "task": "B01",
+      "need": "settings.load() and catalog.snapshot()",
+      "state": "absent; substitutes used"
+    },
+    {
+      "task": "B02",
+      "need": "PromptAssembler.build(settings, catalog) with prompt_hash / catalog_version / settings_hash",
+      "state": "absent; substitute used"
+    },
+    {
+      "task": "B03",
+      "need": "UpperModels.classify(input_text, prompt_snapshot, provider_id) -> three probabilities; generate(input_text, route, prompt_snapshot, provider_id) -> UpperResult without route",
+      "state": "absent; substitutes used"
+    },
+    {
+      "task": "B04",
+      "need": "claim_input / save_result / reserve_batch / record_delivery / claim_public_reply",
+      "state": "implemented in this worktree"
+    },
+    {
+      "task": "B06",
+      "need": "capabilities(peer) and inject(peer, batch) -> outcome with status/error_code",
+      "state": "implemented in this worktree"
+    }
+  ],
+  "entry_points": "None yet. B10 must call process() from the real event hook, pass a public_sender bound to that event, and use permits_automatic_output() to suppress the Host default reply.",
+  "tests": {
+    "new": [
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_pipeline.py -v -> 20 tests OK",
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_output_isolation.py -v -> 12 tests OK"
+    ],
+    "regression": [
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_public_output_router.py -v -> 5 tests OK"
+    ]
+  },
+  "evidence": {
+    "dir": "port_artifacts/upper/B05/20261102T1505Z",
+    "files": [
+      "test_upper_pipeline.log",
+      "test_upper_output_isolation.log",
+      "handoff.json",
+      "results.json",
+      "commands.log"
+    ],
+    "layers": [
+      "unit_fake"
+    ]
+  },
+  "known_issues": [
+    "public_text semantics are not enforced: a hostile model can still phrase a claim of success. C04 §2 accepts this; only field routing is guaranteed.",
+    "TrustedUpperInput requires a non-None sender/event object. B00 must include that field or B10 must pass a wrapper; this is the anti-forgery signal.",
+    "input_busy still delivers the already generated public text; the control batch is not reserved at all, so no segment can be sent later for that plan.",
+    "emit_public reads two private UpperStore helpers (_reply_row/_reply_projection); both modules ship together so the coupling is contained."
+  ],
+  "consumers_to_retest": [
+    "B10 (hook wiring, suppress_default, tool installation)",
+    "B11 (three-route matrix, spy counts)",
+    "B08 (no direct dependency, but shares error codes)"
+  ],
+  "rollback": "Stop constructing UpperPipeline; the legacy PublicOutputRouter keeps its original behaviour and the upper_* tables stay."
+}

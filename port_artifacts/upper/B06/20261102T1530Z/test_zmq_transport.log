@@ -1,0 +1,9 @@
+$ python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_zmq_transport.py -v
+test_astrbot_can_request_the_connected_ex_peer (test_zmq_transport.ZmqRouterChannelTests.test_astrbot_can_request_the_connected_ex_peer) ... ok
+test_handshake_and_binary_handler (test_zmq_transport.ZmqRouterChannelTests.test_handshake_and_binary_handler) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.082s
+
+OK
+EXIT=0

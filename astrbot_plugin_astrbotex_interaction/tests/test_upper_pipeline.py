@@ -250,14 +250,51 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             trusted(robot_id="r2"),
             trusted(text="   "),
             trusted(platform=""),
+            trusted(message_id=""),
         ):
             result = await pipeline.process(broken, public_sender=SpyPublicSender())
             self.assertFalse(result["handled"])
             self.assertFalse(result["suppress_default"])
-            self.assertEqual(result["error_code"], "invalid_input")
+            self.assertEqual(result["error_code"], "invalid_result")
         self.assertEqual(self.models.classify_calls, [])
         self.assertEqual(self.control.inject_calls, [])
         self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM upper_inputs").fetchone()[0], 0)
+
+    async def test_b00_trusted_input_shape_is_accepted(self):
+        """B00's TrustedUpperInput carries input_key/_marker/ex_session, no platform."""
+        from types import SimpleNamespace
+
+        marker = object()
+        b00_input = SimpleNamespace(
+            _marker=marker, input_key="b00-input-key-1", origin="group:1",
+            robot_id="r1", user_id="u1", session_id="s1", route_ref="route-1",
+            ex_session="ex-from-trusted", input_text="把红杯子拿过来",
+        )
+        pipeline = self.pipeline()
+        sender = SpyPublicSender()
+        result = await pipeline.process(b00_input, public_sender=sender)
+        self.assertTrue(result["handled"], result)
+        self.assertEqual(result["route"], "speech_and_action")
+        self.assertEqual(len(sender.calls), 1)
+        plan = self.upper.get_plan(result["plan_id"])
+        self.assertEqual(plan["input_key"], "b00-input-key-1")
+        # The session comes from the trusted input, not from a capabilities read.
+        self.assertEqual(self.control.capabilities_calls, [])
+        self.assertEqual(self.control.inject_calls[0][1]["ex_session"], "ex-from-trusted")
+
+    async def test_hand_built_b00_input_without_marker_is_refused(self):
+        from types import SimpleNamespace
+
+        forged = SimpleNamespace(
+            _marker=None, input_key="forged", origin="group:1", robot_id="r1",
+            user_id="u1", session_id="s1", route_ref="route-1", ex_session="ex-1",
+            input_text="do something",
+        )
+        pipeline = self.pipeline()
+        result = await pipeline.process(forged, public_sender=SpyPublicSender())
+        self.assertEqual(result["error_code"], "invalid_result")
+        self.assertFalse(result["handled"])
+        self.assertEqual(self.models.classify_calls, [])
 
     async def test_decision_failure_sends_nothing(self):
         pipeline = self.pipeline(FakeModels(classify_error=RuntimeError("provider down")))

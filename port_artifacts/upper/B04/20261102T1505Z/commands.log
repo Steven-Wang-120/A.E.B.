@@ -1,0 +1,9 @@
+# B04 evidence run 20261102T1505Z
+# revision 3569ab488e766ea3af8cdd15cd83bcaa7ea9a864
+# worktree D:/Code/A.E.B-work/upper-b04-b06 (branch upper/B04-B06)
+# interpreter: Python 3.12 (pyzmq 27.1.0 present); the 3.13 interpreter on this
+# machine has no pyzmq, so 3.12 is used for every suite that imports the plugin.
+# working directory: D:/Code/A.E.B-work/upper-b04-b06
+
+python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_store.py -v
+python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_task_store.py -v

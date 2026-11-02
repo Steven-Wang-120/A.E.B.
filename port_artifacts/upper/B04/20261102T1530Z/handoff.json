@@ -1,0 +1,79 @@
+{
+  "task_id": "B04",
+  "title": "计划与投递持久化",
+  "status": "PASS",
+  "scope": "unit_fake: real SQLite + real TaskStore transactions. No model, no socket.",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "environment": {
+    "os": "Windows 11 (10.0.26200)",
+    "python_primary": "3.12 at C:/Users/17088/AppData/Local/Programs/Python/Python312/python.exe (pyzmq 27.1.0)",
+    "python_alt": "3.13.12 at C:/Users/17088/.workbuddy-ai/binaries/python/versions/3.13.12/python.exe (no pyzmq -> socket suites cannot run)",
+    "worktree": "D:/Code/A.E.B-work/upper-b04-b06",
+    "branch": "upper/B04-B06",
+    "host_version": "AstrBot 4.26.7 at D:/Code/AstrBot-latest (read-only; astrbot package not importable here)",
+    "upstream_contract": "B00 upper_contracts.py read from D:/Code/A.E.B-work/upper-b00-b03 @ 384eec0; not copied into this branch"
+  },
+  "changed_files": [
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/upper_store.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/tests/test_upper_store.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/task_store.py",
+      "change": "modified",
+      "note": "additive init_extension_tables() DDL hook only; no existing method changed, no table dropped"
+    }
+  ],
+  "interfaces": {
+    "claim_input(*, robot_id, user_id, session_id, input_key=None, platform='', origin='', source_message_id='') -> (record, claimed)": "accepts B00's TrustedUpperInput.input_key verbatim, or derives a sha256 key from the platform/origin/message-id triple; text is never used for dedupe",
+    "save_result(input_key, result, *, generation, snapshots+hashes) -> plan": "one transaction; same result replays the same ids, different result is id_conflict",
+    "reserve_batch(plan_id, *, peer, ex_session, robot_id, route_ref) -> batch": "freezes the C01 envelope + payload_hash; unique index enforces one batch per plan",
+    "record_delivery(batch_id, phase, *, error_code, receipt) -> batch": "received/injected/rejected/delivery_unknown; only this batch's segments move",
+    "claim_public_reply(plan_id) -> (reply, claimed) / record_public_delivery(reply_id, status)": "single public exit, claimed before send",
+    "get_plan(plan_id) / list_plans(limit, offset)": "read-only projection for B07; snapshot bodies withheld, hashes exposed",
+    "recover() -> counts": "sending -> delivery_unknown + fence; pending left pending; no auto-resend",
+    "payload_hash(payload) / derive_input_key(...) / normalize_result(result)": "C01 canonical SHA-256; route/field guards; refuses rather than truncating"
+  },
+  "dependencies": [
+    {
+      "task": "B00",
+      "need": "UpperResult field names and canonical hash equality",
+      "state": "aligned to the published surface; hash is injectable so B10 can wire upper_contracts.canonical_hash"
+    }
+  ],
+  "entry_points": "B10 constructs UpperStore(task_store); recover() runs in the constructor.",
+  "tests": {
+    "new": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_store.py -v -> 19 OK",
+    "regression": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_task_store.py -v -> 6 OK"
+  },
+  "evidence": {
+    "dir": "port_artifacts/upper/B04/20261102T1530Z",
+    "files": [
+      "test_upper_store.log",
+      "test_task_store.log",
+      "baseline_and_transport_regression.log",
+      "handoff.json",
+      "results.json",
+      "commands.log"
+    ],
+    "layers": [
+      "unit_fake"
+    ]
+  },
+  "known_issues": [
+    "Suffix continuation is intentionally absent: reserve_batch returns the existing batch, so segment 3 of a send_count=2 plan stays pending for the whole round.",
+    "recover() only touches records that were still in flight at start-up; a terminal delivery_unknown is never revisited.",
+    "payload_hash() reimplements the C01 recipe rather than importing upper_contracts (B00 owns that file). It is injectable via hasher=; verify equality once both branches are merged."
+  ],
+  "consumers_to_retest": [
+    "B05",
+    "B07",
+    "B10",
+    "B11"
+  ],
+  "rollback": "Disable the feature; upper_* tables remain and older builds ignore them."
+}

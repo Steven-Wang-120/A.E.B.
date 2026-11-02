@@ -448,6 +448,31 @@ class ControlChannelTests(unittest.IsolatedAsyncioTestCase):
         finally:
             probe.close(linger=0)
 
+    async def test_b00_injection_batch_object_is_accepted(self):
+        """B00's InjectionBatch is a dataclass with to_dict()/payload_hash()."""
+
+        class B00Batch:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def to_dict(self):
+                return dict(self._payload)
+
+            def payload_hash(self):
+                return payload_hash(self._payload)
+
+        peer = await self.peer_with()
+        projection = frozen_batch()
+        outcome = await self.channel.inject(b"ex-control", B00Batch(projection["payload"]))
+        self.assertEqual(outcome.status, "injected")
+        self.assertEqual(outcome.payload_hash, projection["payload_hash"])
+        self.assertEqual(peer.injects()[0]["payload"], projection["payload"])
+
+        # A batch object that cannot describe itself is refused, not guessed at.
+        rejected = await self.channel.inject(b"ex-control", object())
+        self.assertEqual(rejected.error_code, "invalid_batch")
+        self.assertFalse(rejected.sent)
+
     async def test_outcome_serialises_without_leaking_payload(self):
         await self.peer_with()
         outcome = await self.channel.inject(b"ex-control", frozen_batch())

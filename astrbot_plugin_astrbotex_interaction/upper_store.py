@@ -74,15 +74,22 @@ def payload_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical(payload).encode("utf-8")).hexdigest()
 
 
-def input_key(platform: str, origin: str, source_message_id: str) -> str:
+def derive_input_key(platform: str, origin: str, source_message_id: str) -> str:
     """Deterministic claim key for one trusted inbound message.
 
     Hashing the triple keeps the key path-safe and bounded while the component
     columns stay inspectable.  Duplicate detection never falls back to comparing
     input *text*: two distinct messages with identical text must stay distinct.
+
+    B00's ``TrustedUpperInput`` already carries a framework-issued ``input_key``;
+    in that case this helper is not used and the caller's key is stored verbatim.
     """
     material = "\x1f".join((platform, origin, source_message_id)).encode("utf-8")
     return hashlib.sha256(material).hexdigest()
+
+
+# Historical name kept so callers that imported it keep working.
+input_key = derive_input_key
 
 
 def _field(obj: Any, name: str, default: Any = None) -> Any:
@@ -210,8 +217,11 @@ CREATE TABLE IF NOT EXISTS upper_inputs (
     error_code TEXT,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL);
+-- Partial: B00's TrustedUpperInput carries its own framework-issued input_key
+-- and has no platform/message id, so those rows must not collide on ''.
+DROP INDEX IF EXISTS upper_inputs_identity;
 CREATE UNIQUE INDEX IF NOT EXISTS upper_inputs_identity
-    ON upper_inputs(platform, origin, source_message_id);
+    ON upper_inputs(platform, origin, source_message_id) WHERE source_message_id <> '';
 CREATE TABLE IF NOT EXISTS upper_plans (
     plan_id TEXT PRIMARY KEY,
     input_key TEXT NOT NULL UNIQUE,
@@ -332,21 +342,31 @@ class UpperStore:
     # ------------------------------------------------------------------
     # inputs
     # ------------------------------------------------------------------
-    def claim_input(self, *, platform: str, origin: str, source_message_id: str,
-                    robot_id: str, user_id: str, session_id: str) -> tuple[dict, bool]:
+    def claim_input(self, *, robot_id: str, user_id: str, session_id: str,
+                    input_key: str | None = None, platform: str = "",
+                    origin: str = "", source_message_id: str = "") -> tuple[dict, bool]:
         """Atomically claim one trusted inbound message.
 
         Returns ``(record, claimed)``.  ``claimed`` is False when a concurrent or
-        earlier handler already owns this exact ``platform+origin+message id``;
-        the caller must then reuse the existing generation instead of generating
-        and sending a second time.
+        earlier handler already owns this input; the caller must then reuse the
+        existing generation instead of generating and sending a second time.
+
+        Pass B00's ``TrustedUpperInput.input_key`` when available; otherwise the
+        key is derived from the ``platform``/``origin``/``source_message_id``
+        triple, which must then all be present.
         """
-        for value, name in ((platform, "platform"), (origin, "origin"),
-                            (source_message_id, "source_message_id"),
-                            (robot_id, "robot_id"), (user_id, "user_id"),
+        for value, name in ((robot_id, "robot_id"), (user_id, "user_id"),
                             (session_id, "session_id")):
             _require_wire_id(value, name)
-        key = input_key(platform, origin, source_message_id)
+        if input_key is not None:
+            _require_wire_id(input_key, "input_key")
+            key = input_key
+            origin = origin or ""
+        else:
+            for value, name in ((platform, "platform"), (origin, "origin"),
+                                (source_message_id, "source_message_id")):
+                _require_wire_id(value, name)
+            key = derive_input_key(platform, origin, source_message_id)
         now = self._clock()
         with self.store.transaction():
             row = self._input_row(key)

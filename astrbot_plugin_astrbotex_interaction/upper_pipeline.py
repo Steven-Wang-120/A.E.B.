@@ -35,6 +35,24 @@ SPEECH_AND_ACTION = "speech_and_action"
 
 MAX_INPUT_CHARS = 8192
 
+# B00's published table.  Anything outside it is a pipeline-local diagnostic;
+# format violations are folded back into the table so B07/B11 never have to
+# switch on an unknown format code.
+CONTRACT_CODES = frozenset({
+    "invalid_probabilities", "invalid_result", "invalid_batch", "payload_too_large",
+    "route_mismatch", "session_mismatch", "id_conflict", "input_busy",
+    "backend_unsupported", "delivery_unknown",
+})
+
+
+def contract_code(code: str) -> str:
+    """Fold store-level ``invalid_<field>`` codes into ``invalid_result``."""
+    if code in CONTRACT_CODES:
+        return code
+    if code.startswith("invalid_"):
+        return "invalid_result"
+    return code
+
 
 def _field(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
@@ -142,32 +160,58 @@ class UpperPipeline:
 
     # ------------------------------------------------------------------
     def _validate(self, trusted: Any) -> dict[str, Any]:
-        """Refuse anything that did not come from a real platform event."""
-        if _field(trusted, "trusted", False) is not True:
-            raise TaskError("invalid_input")
-        sender = _field(trusted, "sender", None)
-        if sender is None:
-            sender = _field(trusted, "event", None)
-        if sender is None:
-            raise TaskError("invalid_input")
+        """Refuse anything that did not come from a real platform event.
+
+        Two accepted shapes:
+
+        * B00's ``TrustedUpperInput`` -- carries a framework-issued ``input_key``
+          and the private ``_marker`` that makes a hand-built instance fail.
+        * The pre-B00 mapping used by the unit tests: ``trusted is True`` plus a
+          real ``sender``/``event`` object.
+
+        Both are checked for a live sender and for a robot id that matches this
+        deployment.  A model result or a Page POST body can satisfy neither.
+        """
+        marker = _field(trusted, "_marker", None)
+        issued = marker is not None and isinstance(_field(trusted, "input_key", None), str)
+        if not issued:
+            if _field(trusted, "trusted", False) is not True:
+                raise TaskError("invalid_result")
+            sender = _field(trusted, "sender", None)
+            if sender is None:
+                sender = _field(trusted, "event", None)
+            if sender is None:
+                raise TaskError("invalid_result")
+        else:
+            sender = marker
 
         values: dict[str, Any] = {}
-        for name in ("platform", "origin", "source_message_id", "robot_id",
-                     "user_id", "session_id"):
+        for name in ("robot_id", "user_id", "session_id"):
             value = _field(trusted, name, None)
             if not isinstance(value, str) or not value.strip():
-                raise TaskError("invalid_input")
+                raise TaskError("invalid_result")
             values[name] = value
         if values["robot_id"] != self.robot_id:
-            raise TaskError("invalid_input")
+            raise TaskError("invalid_result")
+
+        values["input_key"] = _field(trusted, "input_key", None) if issued else None
+        values["platform"] = _field(trusted, "platform", "") or ""
+        values["origin"] = _field(trusted, "origin", "") or ""
+        values["source_message_id"] = _field(trusted, "source_message_id", "") or ""
+        if not issued and not (values["platform"] and values["source_message_id"]):
+            raise TaskError("invalid_result")
 
         text = _field(trusted, "input_text", None)
         if not isinstance(text, str) or not text.strip():
-            raise TaskError("invalid_input")
+            raise TaskError("invalid_result")
         if len(text) > MAX_INPUT_CHARS:
-            raise TaskError("invalid_input")
+            raise TaskError("invalid_result")
         values["input_text"] = text
         values["route_ref"] = _field(trusted, "route_ref", None) or self.route_ref
+        # B00 puts the session on the trusted input; prefer it over a live
+        # capabilities read so the batch is bound to the session that admitted
+        # the message rather than whatever the peer advertises later.
+        values["ex_session"] = _field(trusted, "ex_session", None) or None
         values["sender"] = sender
         return values
 
@@ -192,13 +236,15 @@ class UpperPipeline:
         # Claim before any model work: a repeated Host hook must not generate.
         try:
             record, claimed = self.store.claim_input(
-                platform=values["platform"], origin=values["origin"],
+                input_key=values["input_key"], platform=values["platform"],
+                origin=values["origin"],
                 source_message_id=values["source_message_id"],
                 robot_id=values["robot_id"], user_id=values["user_id"],
                 session_id=values["session_id"])
         except TaskError as exc:
-            self._emit("rejected", error_code=exc.code)
-            return self._finish(handled=False, suppress_default=False, error_code=exc.code)
+            code = contract_code(exc.code)
+            self._emit("rejected", error_code=code)
+            return self._finish(handled=False, suppress_default=False, error_code=code)
 
         if not claimed:
             # Already owned by an earlier or concurrent handler.  Read, do not act.
@@ -235,8 +281,9 @@ class UpperPipeline:
         try:
             route = argmax_route(self._normalized_probabilities(probabilities))
         except TaskError as exc:
-            self._reject(record["input_key"], generation, exc.code)
-            return self._finish(handled=False, suppress_default=False, error_code=exc.code)
+            code = contract_code(exc.code)
+            self._reject(record["input_key"], generation, code)
+            return self._finish(handled=False, suppress_default=False, error_code=code)
 
         if not self._is_alive():
             self._reject(record["input_key"], generation, "generation_stale")
@@ -269,9 +316,10 @@ class UpperPipeline:
                 catalog_hash=_field(prompt_snapshot, "catalog_version", "") or "",
                 prompt_hash=_field(prompt_snapshot, "prompt_hash", "") or "")
         except TaskError as exc:
-            self._reject(record["input_key"], generation, exc.code)
-            self._emit("result_rejected", error_code=exc.code)
-            return self._finish(handled=False, suppress_default=False, error_code=exc.code)
+            code = contract_code(exc.code)
+            self._reject(record["input_key"], generation, code)
+            self._emit("result_rejected", error_code=code)
+            return self._finish(handled=False, suppress_default=False, error_code=code)
 
         plan_id = plan["plan_id"]
         self._emit("planned", plan_id=plan_id, route=route,
@@ -285,7 +333,8 @@ class UpperPipeline:
                                 route=route, control_status=None, public_sent=False)
 
         control_status, control_error = await self._dispatch_control(
-            plan, peer=peer, route_ref=values["route_ref"])
+            plan, peer=peer, route_ref=values["route_ref"],
+            ex_session=values["ex_session"])
 
         public_sent = False
         public_error = None
@@ -313,7 +362,8 @@ class UpperPipeline:
 
     # ------------------------------------------------------------------
     async def _dispatch_control(self, plan: dict, *, peer: bytes | None,
-                                route_ref: str) -> tuple[str | None, str | None]:
+                                route_ref: str,
+                                ex_session: str | None = None) -> tuple[str | None, str | None]:
         """Reserve and inject.  Returns ``(status, error_code)``.
 
         Never raises: a control failure is a recorded outcome, and the already
@@ -327,16 +377,20 @@ class UpperPipeline:
             return None, "input_busy"
 
         target = peer if peer is not None else self.peer
-        try:
-            summary = await self.control.capabilities(target)
-        except Exception as exc:  # noqa: BLE001
-            code = getattr(exc, "code", "backend_unsupported")
-            self._emit("control_unavailable", plan_id=plan["plan_id"], error_code=code)
-            return None, code
+        if ex_session is None:
+            # No session on the trusted input: ask the peer, then freeze the
+            # answer into the batch so a later session change is a refusal.
+            try:
+                summary = await self.control.capabilities(target)
+            except Exception as exc:  # noqa: BLE001
+                code = getattr(exc, "code", "backend_unsupported")
+                self._emit("control_unavailable", plan_id=plan["plan_id"], error_code=code)
+                return None, code
+            ex_session = summary["ex_session"]
 
         try:
             batch = self.store.reserve_batch(
-                plan["plan_id"], peer=target, ex_session=summary["ex_session"],
+                plan["plan_id"], peer=target, ex_session=ex_session,
                 robot_id=self.robot_id, route_ref=route_ref)
         except TaskError as exc:
             self._emit("reserve_failed", plan_id=plan["plan_id"], error_code=exc.code)

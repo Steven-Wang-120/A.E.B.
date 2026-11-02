@@ -373,16 +373,51 @@ class ControlChannel:
     # ------------------------------------------------------------------
     # inject
     # ------------------------------------------------------------------
+    def _normalize_batch(self, batch: Any) -> dict[str, Any] | None:
+        """Accept B04's frozen projection or B00's ``InjectionBatch``.
+
+        B00's dataclass is the shared contract; B04's mapping is what the store
+        returns.  Both describe the same wire envelope, so the channel works
+        with whichever one the caller has and never rebuilds the payload.
+        """
+        if isinstance(batch, dict) and isinstance(batch.get("payload"), dict):
+            return batch
+        to_dict = getattr(batch, "to_dict", None)
+        if not callable(to_dict):
+            return None
+        payload = to_dict()
+        if not isinstance(payload, dict):
+            return None
+        frozen = getattr(batch, "payload_hash", None)
+        digest = frozen() if callable(frozen) else payload_hash(payload, self._hasher)
+        segments = payload.get("segments")
+        ordinals = [s.get("ordinal") for s in segments
+                    if isinstance(s, dict)] if isinstance(segments, list) else []
+        return {
+            "batch_id": payload.get("batch_id", ""),
+            "request_id": payload.get("request_id", ""),
+            "payload": payload,
+            "payload_hash": digest,
+            "ex_session": payload.get("ex_session"),
+            "robot_id": payload.get("robot_id"),
+            "route_ref": payload.get("route_ref"),
+            "first_ordinal": ordinals[0] if ordinals else None,
+            "last_ordinal": ordinals[-1] if ordinals else None,
+        }
+
     async def inject(self, peer: bytes | None, batch: Any, *,
                      timeout_sec: float | None = None) -> DeliveryOutcome:
         """Send one frozen batch to the explicit peer and classify the outcome.
 
-        ``batch`` is B04's frozen envelope projection (``payload``,
-        ``payload_hash``, ``batch_id``, ``request_id``, ``ex_session``,
-        ``robot_id``, ``route_ref``).  It is re-verified here, not trusted: the
-        store is durable state, and a corrupted or edited row must not become a
-        wire message.
+        ``batch`` is B00's ``InjectionBatch`` or B04's frozen projection.  It is
+        re-verified here, not trusted: the store is durable state, and a
+        corrupted or edited row must not become a wire message.
         """
+        batch = self._normalize_batch(batch)
+        if batch is None:
+            return DeliveryOutcome(status=REJECTED, batch_id="", request_id="",
+                                   payload_hash="", error_code="invalid_batch",
+                                   sent=False)
         batch_id = _field(batch, "batch_id", "") or ""
         request_id = _field(batch, "request_id", "") or ""
         frozen_hash = _field(batch, "payload_hash", "") or ""
