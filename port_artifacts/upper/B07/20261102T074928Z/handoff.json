@@ -1,0 +1,128 @@
+{
+  "task_id": "B07",
+  "status": "PASS",
+  "scope": [
+    "unit_fake"
+  ],
+  "code_revision": {
+    "repo": "D:/Code/A.E.B",
+    "worktree": "D:\\Code\\A.E.B-work\\upper-b07-b08",
+    "branch": "upper/B07-B08",
+    "head": "717dfd7 B07+B08: dashboard management API and native plugin page",
+    "base": "b8b448e",
+    "dirty_tree": "M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/01-actions-empty.png\n M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/03-action-saved.png\n M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/04-delete-confirm.png\n M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/06-settings.png\n M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/upper_control_evidence.json"
+  },
+  "changed_files": {
+    "added": [
+      "astrbot_plugin_astrbotex_interaction/upper_api.py",
+      "astrbot_plugin_astrbotex_interaction/_conf_schema.json",
+      "astrbot_plugin_astrbotex_interaction/tests/test_upper_api.py"
+    ],
+    "modified": [],
+    "deleted": []
+  },
+  "interfaces": {
+    "registration": "register_upper_api(context, dependencies, *, responder=None, request_proxy=None)",
+    "endpoints": [
+      "GET upper/settings",
+      "POST upper/settings/save",
+      "GET upper/providers",
+      "GET upper/actions",
+      "POST upper/actions/save",
+      "POST upper/actions/delete",
+      "GET upper/prompts",
+      "POST upper/prompts/save",
+      "GET upper/plans",
+      "GET upper/plans/get"
+    ],
+    "error_prefix": "[UPPER:<code>] <message>",
+    "error_status": {
+      "revision_conflict": 409,
+      "invalid_request": 400,
+      "dependency_unavailable": 503,
+      "not_found": 404
+    },
+    "config_fields": [
+      "upper_enabled",
+      "routing_provider_id",
+      "generation_provider_id",
+      "routing_prompt",
+      "planning_prompt",
+      "control_enabled",
+      "control_bind_host",
+      "control_port",
+      "control_peer_id",
+      "robot_id",
+      "model_timeout_s"
+    ]
+  },
+  "dependencies": {
+    "injected": [
+      "settings",
+      "actions",
+      "plans",
+      "ex_availability",
+      "runtime_status",
+      "prompt_defaults",
+      "providers",
+      "notes"
+    ],
+    "upstream": [
+      "B01 (catalog records, CAS)",
+      "B04 (plan records)",
+      "B02 (prompt snapshots)"
+    ],
+    "consumers_to_retest": [
+      "B08 (page consumes these endpoints)",
+      "B10 (wiring in main.py)"
+    ]
+  },
+  "entry_points": [
+    "upper_api.register_upper_api",
+    "upper_api.UpperApiDependencies"
+  ],
+  "tests": {
+    "commands": [
+      [
+        "C:\\Users\\17088\\.workbuddy-ai\\binaries\\python\\versions\\3.13.12\\python.exe",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "astrbot_plugin_astrbotex_interaction/tests",
+        "-p",
+        "test_upper_api.py",
+        "-v"
+      ],
+      [
+        "C:\\Users\\17088\\.workbuddy-ai\\binaries\\python\\versions\\3.13.12\\python.exe",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "astrbot_plugin_astrbotex_interaction/tests"
+      ]
+    ],
+    "task_suite": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_api.py -v -> OK (49 tests)",
+    "task_suite_exit_zero": true,
+    "full_suite_exit_zero": false,
+    "full_suite_note": "24 failing tests, identical set to the b8b448e baseline (see baseline_comparison.md, baseline_failures.txt, worktree_failures.txt)"
+  },
+  "evidence": {
+    "directory": "port_artifacts/upper/B07/20261102T074928Z",
+    "files": [
+      "handoff.json",
+      "commands.log",
+      "results.json"
+    ]
+  },
+  "known_issues": [
+    "main.py is not touched by design (C00 single-owner rule); B10 must call register_upper_api during plugin init.",
+    "Full plugin suite: 4 failures + 13 errors, identical to the b8b448e baseline."
+  ],
+  "rollback": [
+    "Do not call register_upper_api; no other module imports upper_api."
+  ]
+}

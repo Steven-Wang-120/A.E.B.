@@ -1,0 +1,44 @@
+{
+  "run_id": "20261102T074928Z",
+  "task_id": "B07",
+  "generated_at": "2026-11-02T07:55:26Z",
+  "commands": [
+    {
+      "command": [
+        "C:\\Users\\17088\\.workbuddy-ai\\binaries\\python\\versions\\3.13.12\\python.exe",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "astrbot_plugin_astrbotex_interaction/tests",
+        "-p",
+        "test_upper_api.py",
+        "-v"
+      ],
+      "cwd": "D:\\Code\\A.E.B-work\\upper-b07-b08",
+      "exit_code": 0,
+      "duration_s": 2.08,
+      "scope": "unit_fake",
+      "summary": "OK",
+      "not_run_reason": null
+    },
+    {
+      "command": [
+        "C:\\Users\\17088\\.workbuddy-ai\\binaries\\python\\versions\\3.13.12\\python.exe",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "astrbot_plugin_astrbotex_interaction/tests"
+      ],
+      "cwd": "D:\\Code\\A.E.B-work\\upper-b07-b08",
+      "exit_code": 1,
+      "duration_s": 14.46,
+      "scope": "unit_fake",
+      "summary": "FAILED (failures=5, errors=19)",
+      "not_run_reason": null
+    }
+  ]
+}
