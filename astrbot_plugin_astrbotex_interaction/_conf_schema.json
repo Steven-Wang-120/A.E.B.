@@ -1,0 +1,68 @@
+{
+  "upper_enabled": {
+    "description": "启用上位控制入口",
+    "type": "bool",
+    "default": false,
+    "hint": "关闭时保持原有三通道、普通聊天与旧任务规划行为不变。"
+  },
+  "routing_provider_id": {
+    "description": "三分类决策模型 Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "填写本机已配置的聊天 Provider ID；留空表示使用 Host 默认会话模型。此处不保存任何密钥。"
+  },
+  "generation_provider_id": {
+    "description": "内容生成模型 Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "用于生成公开回复与执行段落；留空表示与决策模型相同。此处不保存任何密钥。"
+  },
+  "routing_prompt": {
+    "description": "公共路由规范覆盖",
+    "type": "text",
+    "default": "",
+    "hint": "留空表示使用插件内置的路由规范。覆盖内容只作为纯文本保存，不执行其中的 Markdown 或脚本。"
+  },
+  "planning_prompt": {
+    "description": "公共编排规范覆盖",
+    "type": "text",
+    "default": "",
+    "hint": "留空表示使用插件内置的编排规范。覆盖内容只作为纯文本保存。"
+  },
+  "control_enabled": {
+    "description": "启用独立 control 通道",
+    "type": "bool",
+    "default": false,
+    "hint": "修改后需重载插件才会重新绑定监听端口。"
+  },
+  "control_bind_host": {
+    "description": "control 通道监听地址",
+    "type": "string",
+    "default": "127.0.0.1",
+    "hint": "默认仅本机回环。跨机部署沿用部署方已有的可信网络边界。修改后需重载插件。"
+  },
+  "control_port": {
+    "description": "control 通道监听端口",
+    "type": "int",
+    "default": 8769,
+    "hint": "不修改原 text/audio/vision 三通道的默认端口。修改后需重载插件。"
+  },
+  "control_peer_id": {
+    "description": "可信 EX peer 标识",
+    "type": "string",
+    "default": "",
+    "hint": "只接受已登记的对端；下发必须显式指定 peer，不使用默认 peer。修改后需重载插件。"
+  },
+  "robot_id": {
+    "description": "本连接绑定的机器人标识",
+    "type": "string",
+    "default": "",
+    "hint": "用于核对批次身份，不接受由模型或页面生成的取值。修改后需重载插件。"
+  },
+  "model_timeout_s": {
+    "description": "模型调用超时（秒）",
+    "type": "float",
+    "default": 30.0,
+    "hint": "决策与生成模型单次调用的时间预算，范围 1..600。"
+  }
+}

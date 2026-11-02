@@ -1,0 +1,98 @@
+run_id=20261102T074928Z
+task_id=B08
+worktree=D:\Code\A.E.B-work\upper-b07-b08
+python=3.13.14 (C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\python.exe)
+os=Windows-11-10.0.26200-SP0
+generated_at=2026-11-02T07:55:26Z
+
+$ (cwd=D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction) node --test tests/ui/upper_control.spec.mjs
+exit_code=0  duration_s=6.3
+TAP version 13
+# Subtest: boots with four areas and the runtime status chips
+ok 1 - boots with four areas and the runtime status chips
+  ---
+  duration_ms: 687.5117
+  type: 'test'
+  ...
+# Subtest: creates an action, saves it, and it survives a reload
+ok 2 - creates an action, saves it, and it survives a reload
+  ---
+  duration_ms: 456.8617
+  type: 'test'
+  ...
+# Subtest: edits, disables and deletes an entry
+ok 3 - edits, disables and deletes an entry
+  ---
+  duration_ms: 416.6397
+  type: 'test'
+  ...
+# Subtest: skill level hides the executable id and previews text safely
+ok 4 - skill level hides the executable id and previews text safely
+  ---
+  duration_ms: 275.131
+  type: 'test'
+  ...
+# Subtest: prompts save independently and report their source
+ok 5 - prompts save independently and report their source
+  ---
+  duration_ms: 242.7593
+  type: 'test'
+  ...
+# Subtest: provider and channel saves flag the fields that need a reload
+ok 6 - provider and channel saves flag the fields that need a reload
+  ---
+  duration_ms: 260.7224
+  type: 'test'
+  ...
+# Subtest: revision conflict keeps the draft and offers reload or copy
+ok 7 - revision conflict keeps the draft and offers reload or copy
+  ---
+  duration_ms: 472.226
+  type: 'test'
+  ...
+# Subtest: 503 and network failures keep every input
+ok 8 - 503 and network failures keep every input
+  ---
+  duration_ms: 263.544
+  type: 'test'
+  ...
+# Subtest: records show delivery phases without claiming execution
+ok 9 - records show delivery phases without claiming execution
+  ---
+  duration_ms: 224.108
+  type: 'test'
+  ...
+# Subtest: layout holds at 1280px and 390px, in both themes
+ok 10 - layout holds at 1280px and 390px, in both themes
+  ---
+  duration_ms: 371.6544
+  type: 'test'
+  ...
+# Subtest: unsaved changes are guarded before switching areas
+ok 11 - unsaved changes are guarded before switching areas
+  ---
+  duration_ms: 362.6868
+  type: 'test'
+  ...
+# Subtest: captures the operator walkthrough with its API assertions
+ok 12 - captures the operator walkthrough with its API assertions
+  ---
+  duration_ms: 1854.0347
+  type: 'test'
+  ...
+# Subtest: real Host wiring (only in real_host mode)
+ok 13 - real Host wiring (only in real_host mode) # SKIP NOT_RUN: real_host mode not selected (set UPPER_UI_MODE=real_host)
+  ---
+  duration_ms: 0.257
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 6223.1588
+------------------------------------------------------------------------

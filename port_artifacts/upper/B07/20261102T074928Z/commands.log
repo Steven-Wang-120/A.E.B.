@@ -1,0 +1,542 @@
+run_id=20261102T074928Z
+task_id=B07
+worktree=D:\Code\A.E.B-work\upper-b07-b08
+python=3.13.14 (C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\python.exe)
+os=Windows-11-10.0.26200-SP0
+generated_at=2026-11-02T07:55:26Z
+
+$ (cwd=D:\Code\A.E.B-work\upper-b07-b08) C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\python.exe -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_api.py -v
+exit_code=0  duration_s=2.1
+test_absolute_path_action_id_is_rejected (test_upper_api.ActionEndpointTests.test_absolute_path_action_id_is_rejected) ... ok
+test_create_then_read_back_from_rebuilt_catalog (test_upper_api.ActionEndpointTests.test_create_then_read_back_from_rebuilt_catalog) ... ok
+test_delete_requires_known_reference_and_cas (test_upper_api.ActionEndpointTests.test_delete_requires_known_reference_and_cas) ... ok
+test_file_path_field_is_rejected (test_upper_api.ActionEndpointTests.test_file_path_field_is_rejected) ... ok
+test_get_actions_includes_catalog_version_and_ex_availability (test_upper_api.ActionEndpointTests.test_get_actions_includes_catalog_version_and_ex_availability) ... ok
+test_machine_schema_and_exec_permission_are_rejected (test_upper_api.ActionEndpointTests.test_machine_schema_and_exec_permission_are_rejected) ... ok
+test_markdown_is_stored_as_plain_data (test_upper_api.ActionEndpointTests.test_markdown_is_stored_as_plain_data) ... ok
+test_offline_ex_still_allows_local_editing (test_upper_api.ActionEndpointTests.test_offline_ex_still_allows_local_editing) ... ok
+test_parameter_execution_keys_are_rejected (test_upper_api.ActionEndpointTests.test_parameter_execution_keys_are_rejected) ... ok
+test_primitive_requires_action_id (test_upper_api.ActionEndpointTests.test_primitive_requires_action_id) ... ok
+test_save_action_revision_conflict_is_409 (test_upper_api.ActionEndpointTests.test_save_action_revision_conflict_is_409) ... ok
+test_skill_level_rejects_action_id (test_upper_api.ActionEndpointTests.test_skill_level_rejects_action_id) ... ok
+test_responder_delegates_to_host_helpers (test_upper_api.HostAdapterTests.test_responder_delegates_to_host_helpers) ... ok
+test_api_never_imports_pipeline_or_control_modules (test_upper_api.IsolationTests.test_api_never_imports_pipeline_or_control_modules) ... ok
+test_flat_settings_body_is_accepted (test_upper_api.IsolationTests.test_flat_settings_body_is_accepted) ... ok
+test_repository_conflict_code_maps_to_409 (test_upper_api.IsolationTests.test_repository_conflict_code_maps_to_409) ... upper api: settings save failed: revision_conflict
+ok
+test_responses_carry_no_stack_trace (test_upper_api.IsolationTests.test_responses_carry_no_stack_trace) ... upper api: action catalog failed: boom at C:\secret\path.py line 1
+ok
+test_invalid_cursor_is_rejected (test_upper_api.PlanEndpointTests.test_invalid_cursor_is_rejected) ... ok
+test_missing_plan_id_is_400 (test_upper_api.PlanEndpointTests.test_missing_plan_id_is_400) ... ok
+test_plan_detail_keeps_segment_boundaries_and_no_success_label (test_upper_api.PlanEndpointTests.test_plan_detail_keeps_segment_boundaries_and_no_success_label) ... ok
+test_plan_limit_bounds (test_upper_api.PlanEndpointTests.test_plan_limit_bounds) ... ok
+test_plan_limit_default_and_non_numeric (test_upper_api.PlanEndpointTests.test_plan_limit_default_and_non_numeric) ... ok
+test_plans_are_paged_with_bounded_limit (test_upper_api.PlanEndpointTests.test_plans_are_paged_with_bounded_limit) ... ok
+test_unknown_delivery_phase_maps_to_unknown (test_upper_api.PlanEndpointTests.test_unknown_delivery_phase_maps_to_unknown) ... ok
+test_unknown_plan_is_404 (test_upper_api.PlanEndpointTests.test_unknown_plan_is_404) ... ok
+test_prompt_override_switches_source (test_upper_api.PromptEndpointTests.test_prompt_override_switches_source) ... ok
+test_prompts_report_builtin_source_and_hashes (test_upper_api.PromptEndpointTests.test_prompts_report_builtin_source_and_hashes) ... ok
+test_save_prompt_conflict_is_409 (test_upper_api.PromptEndpointTests.test_save_prompt_conflict_is_409) ... ok
+test_save_prompt_empty_restores_default (test_upper_api.PromptEndpointTests.test_save_prompt_empty_restores_default) ... ok
+test_save_prompt_only_writes_its_own_field (test_upper_api.PromptEndpointTests.test_save_prompt_only_writes_its_own_field) ... ok
+test_save_prompt_rejects_other_kinds (test_upper_api.PromptEndpointTests.test_save_prompt_rejects_other_kinds) ... ok
+test_provider_api_unavailable_is_explicit (test_upper_api.ProviderEndpointTests.test_provider_api_unavailable_is_explicit) ... ok
+test_providers_are_listed_without_secrets (test_upper_api.ProviderEndpointTests.test_providers_are_listed_without_secrets) ... ok
+test_unknown_selected_provider_is_reported_as_stale (test_upper_api.ProviderEndpointTests.test_unknown_selected_provider_is_reported_as_stale) ... ok
+test_methods_are_upper_case_and_stable (test_upper_api.RegistrationTests.test_methods_are_upper_case_and_stable) ... ok
+test_registers_ten_prefixed_routes (test_upper_api.RegistrationTests.test_registers_ten_prefixed_routes) ... ok
+test_reregistration_replaces_instead_of_stacking (test_upper_api.RegistrationTests.test_reregistration_replaces_instead_of_stacking) ... ok
+test_control_port_does_not_collide_with_existing_channels (test_upper_api.SchemaTests.test_control_port_does_not_collide_with_existing_channels) ... ok
+test_new_features_default_to_off (test_upper_api.SchemaTests.test_new_features_default_to_off) ... ok
+test_schema_matches_setting_fields (test_upper_api.SchemaTests.test_schema_matches_setting_fields) ... ok
+test_get_settings_never_returns_secrets (test_upper_api.SettingsEndpointTests.test_get_settings_never_returns_secrets) ... ok
+test_get_settings_returns_values_revision_scope_and_runtime (test_upper_api.SettingsEndpointTests.test_get_settings_returns_values_revision_scope_and_runtime) ... ok
+test_get_settings_without_repository_is_503 (test_upper_api.SettingsEndpointTests.test_get_settings_without_repository_is_503) ... ok
+test_save_settings_persists_across_repository_rebuild (test_upper_api.SettingsEndpointTests.test_save_settings_persists_across_repository_rebuild) ... ok
+test_save_settings_rejects_bool_revision (test_upper_api.SettingsEndpointTests.test_save_settings_rejects_bool_revision) ... ok
+test_save_settings_rejects_unknown_field (test_upper_api.SettingsEndpointTests.test_save_settings_rejects_unknown_field) ... ok
+test_save_settings_rejects_wrong_types (test_upper_api.SettingsEndpointTests.test_save_settings_rejects_wrong_types) ... ok
+test_save_settings_revision_conflict_is_409 (test_upper_api.SettingsEndpointTests.test_save_settings_revision_conflict_is_409) ... ok
+test_save_settings_updates_revision_and_reports_scope (test_upper_api.SettingsEndpointTests.test_save_settings_updates_revision_and_reports_scope) ... ok
+
+----------------------------------------------------------------------
+Ran 49 tests in 1.441s
+
+OK
+------------------------------------------------------------------------
+$ (cwd=D:\Code\A.E.B-work\upper-b07-b08) C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\python.exe -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests
+exit_code=1  duration_s=14.5
+E........................E............................EEEEFEEEEEEEEETask exception was never retrieved
+future: <Task finished name='Task-284' coro=<run_planning_turn() done, defined at D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py:114> exception=ModuleNotFoundError("No module named 'astrbot'") created at C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\tasks.py:410>
+source_traceback: Object created at (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\__main__.py", line 18, in <module>
+    main(module=None)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\main.py", line 104, in __init__
+    self.runTests()
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\main.py", line 270, in runTests
+    self.result = testRunner.run(self.test)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\runner.py", line 240, in run
+    test(result)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\case.py", line 707, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\async_case.py", line 135, in run
+    return super().run(result)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\case.py", line 651, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\async_case.py", line 94, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\async_case.py", line 116, in _callMaybeAsync
+    return self._asyncioRunner.run(
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 712, in run_until_complete
+    self.run_forever()
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 683, in run_forever
+    self._run_once()
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 2052, in _run_once
+    handle._run()
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_output_isolation.py", line 55, in test_P07_late_LLM_result_has_no_send_or_submit
+    future = asyncio.create_task(run_planning_turn(LateHost(), "provider", tools, "task"))
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\tasks.py", line 410, in create_task
+    task = loop.create_task(coro, name=name)
+Traceback (most recent call last):
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+E.....E...........................F......F.....E..E..FF....................upper api: settings save failed: revision_conflict
+.upper api: action catalog failed: boom at C:\secret\path.py line 1
+...................................
+======================================================================
+ERROR: test_chat_tasks (unittest.loader._FailedTest.test_chat_tasks)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_chat_tasks
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\loader.py", line 396, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\loader.py", line 339, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_chat_tasks.py", line 13, in <module>
+    from astrbot.api.star import Context
+ModuleNotFoundError: No module named 'astrbot'
+
+
+======================================================================
+ERROR: test_host_chat_routing (unittest.loader._FailedTest.test_host_chat_routing)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_host_chat_routing
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\loader.py", line 396, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\loader.py", line 339, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_host_chat_routing.py", line 10, in <module>
+    from astrbot.core.config.default import DEFAULT_CONFIG
+ModuleNotFoundError: No module named 'astrbot'
+
+
+======================================================================
+ERROR: test_100_seeded_private_marker_combinations_no_leak (test_output_isolation.IsolationTests.test_100_seeded_private_marker_combinations_no_leak)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_output_isolation.py", line 40, in test_100_seeded_private_marker_combinations_no_leak
+    await run_planning_turn(FakeHost([output]), "provider", tools, marker)
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_O01_goal_without_emit_has_no_public_exit (test_output_isolation.IsolationTests.test_O01_goal_without_emit_has_no_public_exit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_output_isolation.py", line 19, in test_O01_goal_without_emit_has_no_public_exit
+    await run_planning_turn(host, "provider", tools, "task")
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_P07_late_LLM_result_has_no_send_or_submit (test_output_isolation.IsolationTests.test_P07_late_LLM_result_has_no_send_or_submit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\tasks.py", line 507, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\locks.py", line 213, in wait
+    await fut
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_output_isolation.py", line 57, in test_P07_late_LLM_result_has_no_send_or_submit
+    await asyncio.wait_for(started.wait(), 2.0)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\tasks.py", line 506, in wait_for
+    async with timeouts.timeout(timeout):
+               ~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\timeouts.py", line 117, in __aexit__
+    raise TimeoutError from exc_val
+TimeoutError
+
+======================================================================
+ERROR: test_O03_question_only_no_action (test_planning_tools.PlanningTests.test_O03_question_only_no_action)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 52, in test_O03_question_only_no_action
+    await run_planning_turn(host, "provider", tools, "task")
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_P06_batch_validation_before_side_effect (test_planning_tools.PlanningTests.test_P06_batch_validation_before_side_effect)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 75, in test_P06_batch_validation_before_side_effect
+    await run_planning_turn(host, "provider", tools, "task")
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_P09_raw_text_empty_final_errors_chunks_not_success (test_planning_tools.PlanningTests.test_P09_raw_text_empty_final_errors_chunks_not_success) (output=namespace(role='assistant', tools_call_name=[], tools_call_args=[], tools_call_ids=[], completion_text='{"submit_current_goal": {}}', is_chunk=False))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 66, in test_P09_raw_text_empty_final_errors_chunks_not_success
+    await run_planning_turn(FakeHost([output]), "provider", tools, "task")
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_P09_raw_text_empty_final_errors_chunks_not_success (test_planning_tools.PlanningTests.test_P09_raw_text_empty_final_errors_chunks_not_success) (output=namespace(role='assistant', tools_call_name=[], tools_call_args=[], tools_call_ids=[], completion_text='', is_chunk=False))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 66, in test_P09_raw_text_empty_final_errors_chunks_not_success
+    await run_planning_turn(FakeHost([output]), "provider", tools, "task")
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_P09_raw_text_empty_final_errors_chunks_not_success (test_planning_tools.PlanningTests.test_P09_raw_text_empty_final_errors_chunks_not_success) (output=RuntimeError('secret provider traceback'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 66, in test_P09_raw_text_empty_final_errors_chunks_not_success
+    await run_planning_turn(FakeHost([output]), "provider", tools, "task")
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_P09_raw_text_empty_final_errors_chunks_not_success (test_planning_tools.PlanningTests.test_P09_raw_text_empty_final_errors_chunks_not_success) (output=namespace(role='assistant', tools_call_name=['emit_user_message'], tools_call_args=[{'text': 'secret chunk'}], tools_call_ids=['call-0'], completion_text='INTERNAL-SECRET', is_chunk=True))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 66, in test_P09_raw_text_empty_final_errors_chunks_not_success
+    await run_planning_turn(FakeHost([output]), "provider", tools, "task")
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_P09_round_limit (test_planning_tools.PlanningTests.test_P09_round_limit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 86, in test_P09_round_limit
+    await run_planning_turn(host, "provider", tools, "task", max_rounds=1)
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_actual_public_Context_llm_generate_with_fake_provider (test_planning_tools.PlanningTests.test_actual_public_Context_llm_generate_with_fake_provider)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 130, in test_actual_public_Context_llm_generate_with_fake_provider
+    from astrbot.api.star import Context
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_private_goal_plus_emit_and_silent_finish (test_planning_tools.PlanningTests.test_private_goal_plus_emit_and_silent_finish)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 38, in test_private_goal_plus_emit_and_silent_finish
+    await run_planning_turn(host, "configured-provider", tools, "private task")
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\planning_tools.py", line 116, in run_planning_turn
+    from astrbot.core.agent.message import Message, ToolCall
+ModuleNotFoundError: No module named 'astrbot'
+
+======================================================================
+ERROR: test_plugin_channels (unittest.loader._FailedTest.test_plugin_channels)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_plugin_channels
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\loader.py", line 396, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\loader.py", line 339, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_plugin_channels.py", line 24, in <module>
+    plugin_module = importlib.import_module("astrbot_plugin_astrbotex_interaction.main")
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\importlib\__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\main.py", line 16, in <module>
+    import mcp
+ModuleNotFoundError: No module named 'mcp'
+
+
+======================================================================
+ERROR: test_plugin_registers_astrbotex_platform (test_plugin_import.PluginImportTests.test_plugin_registers_astrbotex_platform)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_plugin_import.py", line 13, in test_plugin_registers_astrbotex_platform
+    module = importlib.import_module("astrbot_plugin_astrbotex_interaction.main")
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\importlib\__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1395, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 1023, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\main.py", line 16, in <module>
+    import mcp
+ModuleNotFoundError: No module named 'mcp'
+
+======================================================================
+ERROR: test_task_admission (unittest.loader._FailedTest.test_task_admission)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_task_admission
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\loader.py", line 396, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\unittest\loader.py", line 339, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_task_admission.py", line 10, in <module>
+    from astrbot.core.provider.provider import Provider
+ModuleNotFoundError: No module named 'astrbot'
+
+
+======================================================================
+ERROR: test_late_planning_result_invalid_and_failure_invalidates (test_task_turn_sync.TurnSyncTests.test_late_planning_result_invalid_and_failure_invalidates)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\tasks.py", line 507, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\locks.py", line 213, in wait
+    await fut
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_task_turn_sync.py", line 72, in test_late_planning_result_invalid_and_failure_invalidates
+    await asyncio.wait_for(started.wait(), 2.0)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\tasks.py", line 506, in wait_for
+    async with timeouts.timeout(timeout):
+               ~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\timeouts.py", line 117, in __aexit__
+    raise TimeoutError from exc_val
+TimeoutError
+
+======================================================================
+ERROR: test_provider_cancellation_invalidates_immediately (test_task_turn_sync.TurnSyncTests.test_provider_cancellation_invalidates_immediately)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\tasks.py", line 507, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\locks.py", line 213, in wait
+    await fut
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_task_turn_sync.py", line 108, in test_provider_cancellation_invalidates_immediately
+    await asyncio.wait_for(started.wait(), 2.0)
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\tasks.py", line 506, in wait_for
+    async with timeouts.timeout(timeout):
+               ~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\timeouts.py", line 117, in __aexit__
+    raise TimeoutError from exc_val
+TimeoutError
+
+======================================================================
+FAIL: test_P01_fixed_fake_LLM_coordinator_completes_three_steps (test_planning_tools.PlanningTests.test_P01_fixed_fake_LLM_coordinator_completes_three_steps)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_planning_tools.py", line 115, in test_P01_fixed_fake_LLM_coordinator_completes_three_steps
+    self.fail("private planner did not dispatch")
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: private planner did not dispatch
+
+======================================================================
+FAIL: test_provider_timeout_limit_waits_for_user (test_task_coordinator.CoordinatorTests.test_provider_timeout_limit_waits_for_user)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_task_coordinator.py", line 273, in test_provider_timeout_limit_waits_for_user
+    self.assertEqual(self.current()["error_code"], "provider_timeout")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'planning_failed' != 'provider_timeout'
+- planning_failed
++ provider_timeout
+
+
+======================================================================
+FAIL: test_begin_context_submit_refresh_and_finish_preserves_public_turn (test_task_turn_sync.TurnSyncTests.test_begin_context_submit_refresh_and_finish_preserves_public_turn)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_task_turn_sync.py", line 33, in test_begin_context_submit_refresh_and_finish_preserves_public_turn
+    self.assertEqual([p["operation"] for p in self.turns], ["bind", "bind", "bind"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['bind', 'bind', 'invalidate'] != ['bind', 'bind', 'bind']
+
+First differing element 2:
+'invalidate'
+'bind'
+
+- ['bind', 'bind', 'invalidate']
+?                     ---- ---
+
++ ['bind', 'bind', 'bind']
+?                   +
+
+
+======================================================================
+FAIL: test_reviewed_session_user_intent_feedback_does_not_reenter_review (test_task_turn_sync.TurnSyncTests.test_reviewed_session_user_intent_feedback_does_not_reenter_review)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_task_turn_sync.py", line 362, in test_reviewed_session_user_intent_feedback_does_not_reenter_review
+    self.assertEqual(current["plan_revision"], 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 1 != 2
+
+======================================================================
+FAIL: test_same_session_proven_timed_out_review_waits_for_new_intent (test_task_turn_sync.TurnSyncTests.test_same_session_proven_timed_out_review_waits_for_new_intent)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\17088\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\Code\A.E.B-work\upper-b07-b08\astrbot_plugin_astrbotex_interaction\tests\test_task_turn_sync.py", line 466, in test_same_session_proven_timed_out_review_waits_for_new_intent
+    self.assertEqual(self.current()["status"], "executing")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'planning' != 'executing'
+- planning
++ executing
+
+
+----------------------------------------------------------------------
+Ran 176 tests in 13.560s
+
+FAILED (failures=5, errors=19)
+------------------------------------------------------------------------

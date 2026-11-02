@@ -1,0 +1,16 @@
+{
+  "pages": {
+    "upper-control": {
+      "title": "上位控制",
+      "subtitle": "动作目录、公共提示词、模型与通道设置、本地下发记录",
+      "refresh": "刷新",
+      "dismiss": "关闭",
+      "tab": {
+        "actions": "动作目录",
+        "prompts": "公共提示词",
+        "settings": "模型与通道",
+        "records": "下发记录"
+      }
+    }
+  }
+}
