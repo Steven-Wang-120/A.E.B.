@@ -77,6 +77,18 @@ class TaskStore:
         with self._lock:
             self.db.close()
 
+    def init_extension_tables(self, script: str) -> None:
+        """Additive schema hook for optional subsystems.
+
+        Lets a subsystem (currently the upper-control store) own its own tables
+        on this same connection and transaction discipline without TaskStore
+        learning their meaning.  DDL only: callers pass CREATE ... IF NOT EXISTS
+        statements, which keeps the migration idempotent and leaves every legacy
+        table, row and recovery path untouched.
+        """
+        with self._lock:
+            self.db.executescript(script)
+
     def bind_route(self, authority: TaskAuthority, peer: bytes, *, origin: str = "",
                    source_session: str = "") -> None:
         authority.validate()
