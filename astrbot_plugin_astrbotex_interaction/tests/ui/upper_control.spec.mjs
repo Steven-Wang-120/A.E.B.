@@ -506,6 +506,7 @@ async function openFakePage(browser, fixture, options = {}) {
 
   await page.exposeFunction("__upperHandle", async (method, endpoint, params, body) => {
     fixture.requests.push({ method, endpoint, params: params || null, body: body || null });
+    if (options.beforeRequest) await options.beforeRequest(method, endpoint);
     return handleRequest(fixture, method, endpoint, params, body);
   });
 
@@ -544,6 +545,7 @@ async function openFakePage(browser, fixture, options = {}) {
     const chip = document.getElementById("status-revision");
     return chip && chip.textContent.trim() !== "rev —";
   });
+  if (options.waitUntilReady !== false) await page.waitForSelector("#btn-refresh:not([disabled])");
   return { context, page, errors };
 }
 
@@ -578,6 +580,7 @@ async function openRealHostPage(browser) {
   assert.ok(frame, "Dashboard must create the real plugin iframe");
   await frame.waitForSelector("#tab-actions");
   await frame.waitForFunction(() => /rev \d+/.test(document.querySelector("#status-revision").textContent));
+  await frame.waitForSelector("#btn-refresh:not([disabled])");
   return { context, page, frame, errors };
 }
 
@@ -710,6 +713,30 @@ function fakeTest(name, callback) {
 }
 
 /* ─────────────────────────── tests ────────────────────────────────────── */
+
+fakeTest("late initial reads keep editing locked until every draft is loaded", async (t) => {
+  if (!requireRuntime(t)) return;
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const session = await openFakePage(runtime.browser, createFixture(), {
+    waitUntilReady: false,
+    beforeRequest: async (_method, endpoint) => {
+      if (endpoint === "upper/prompts") await pending;
+    },
+  });
+  try {
+    assert.equal(await session.page.locator("#main").evaluate((node) => node.inert), true);
+    release();
+    await session.page.waitForSelector("#btn-refresh:not([disabled])");
+    assert.equal(await session.page.locator("#main").evaluate((node) => node.inert), false);
+    await session.page.click("#tab-prompts");
+    await session.page.fill("#prompt-routing", "draft after complete load");
+    assert.equal(await session.page.inputValue("#prompt-routing"), "draft after complete load");
+  } finally {
+    release();
+    await session.context.close();
+  }
+});
 
 fakeTest("boots with four areas and the runtime status chips", async (t) => {
   if (!requireRuntime(t)) return;
@@ -1272,6 +1299,7 @@ if (MODE === "real_host") test("real Host page: configure offline, persist, conf
     await first.page.reload();
     const refreshed = await first.page.waitForSelector("iframe.plugin-page-frame");
     first.frame = await refreshed.contentFrame();
+    await first.frame.waitForSelector("#btn-refresh:not([disabled])");
     await first.frame.waitForSelector(".action-item-name");
     assert.ok((await first.frame.locator(".action-item-name").allTextContents()).includes(name));
 
@@ -1282,6 +1310,7 @@ if (MODE === "real_host") test("real Host page: configure offline, persist, conf
     await first.frame.waitForFunction(() => document.querySelector("#settings-save-state").textContent.includes("已保存"));
     await first.page.reload();
     first.frame = await (await first.page.waitForSelector("iframe.plugin-page-frame")).contentFrame();
+    await first.frame.waitForSelector("#btn-refresh:not([disabled])");
     await first.frame.click("#tab-settings");
     await first.frame.waitForFunction((value) => document.querySelector("#field-timeout").value === value, newTimeout);
 
@@ -1293,6 +1322,7 @@ if (MODE === "real_host") test("real Host page: configure offline, persist, conf
     assert.equal((await promptSaved).status(), 200);
     await first.page.reload();
     first.frame = await (await first.page.waitForSelector("iframe.plugin-page-frame")).contentFrame();
+    await first.frame.waitForSelector("#btn-refresh:not([disabled])");
     await first.frame.click("#tab-prompts");
     await first.frame.waitForFunction((value) => document.querySelector("#prompt-routing").value === value, prompt);
     await first.frame.click("#tab-actions");

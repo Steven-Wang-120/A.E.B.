@@ -1195,9 +1195,16 @@ async function refreshAll() {
   const button = $("btn-refresh");
   button.disabled = true;
   setText(button, "刷新中…");
+  // Initial reads complete independently. Editing before all five reads finish
+  // can let a late prompt/provider response replace a new draft.
+  const main = $("main");
+  main.inert = true;
+  main.setAttribute("aria-busy", "true");
   try {
     await Promise.all([loadSettings(), loadProviders(), loadActions(), loadPrompts(), loadPlans()]);
   } finally {
+    main.inert = false;
+    main.removeAttribute("aria-busy");
     button.disabled = false;
     setText(button, t("pages.upper-control.refresh", "刷新"));
   }
