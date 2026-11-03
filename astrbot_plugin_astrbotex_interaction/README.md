@@ -5,6 +5,9 @@ registers the `astrbotex` platform adapter, injects EX context into LLM
 requests, exposes proposal and on-demand vision-buffer tools, proxies STT/TTS
 providers, and maintains three independent ZeroMQ channels.
 
+An optional fourth channel carries upper-control execution steps. It is off by
+default and never moves the three legacy endpoints.
+
 ## Channel layout
 
 AstrBot binds three ROUTER sockets. AstrBotEX must connect one DEALER socket to
@@ -15,15 +18,17 @@ each endpoint and send `system.hello` on every connection.
 | `text` | `tcp://0.0.0.0:8766` | Text interaction, replies, context, proposals, runtime commands, vision JSON fields |
 | `audio` | `tcp://0.0.0.0:8767` | Provider status, STT input, TTS output |
 | `vision` | `tcp://0.0.0.0:8768` | JPEG image frames and vision binary payloads |
+| `control` | `tcp://127.0.0.1:8769` | Upper-control step injection only (`upper.*`), off by default |
 
 The channels are intentionally separate. Slow STT/TTS or high-volume vision
-traffic cannot consume the text channel's queue.
+traffic cannot consume the text channel's queue. The `control` socket is bound
+only when `control_enabled` is set; execution steps never travel on `text`.
 
 ## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ASTRBOTEX_ZMQ_BIND_HOST` | `0.0.0.0` | Bind address for all three ROUTER sockets |
+| `ASTRBOTEX_ZMQ_BIND_HOST` | `0.0.0.0` | Bind address for the three legacy ROUTER sockets |
 | `ASTRBOTEX_ZMQ_TEXT_PORT` | `8766` | Text/JSON channel port |
 | `ASTRBOTEX_ZMQ_AUDIO_PORT` | `8767` | STT/TTS channel port |
 | `ASTRBOTEX_ZMQ_VISION_PORT` | `8768` | JPEG/binary vision channel port |
@@ -31,6 +36,16 @@ traffic cannot consume the text channel's queue.
 | `ASTRBOTEX_ZMQ_VISION_CACHE_ITEMS` | `8` | Number of latest JSON records and JPEG frames retained in each separate vision cache |
 | `ASTRBOTEX_ZMQ_VISION_CACHE_STREAMS` | `8` | Deprecated compatibility alias for `ASTRBOTEX_ZMQ_VISION_CACHE_ITEMS` |
 | `ASTRBOTEX_SESSION_ID` | `astrbotex_default` | Default platform session |
+| `ASTRBOTEX_UPPER_ENABLED` | `0` | Fallback for `upper_enabled` when no Host config is injected |
+| `ASTRBOTEX_UPPER_CONTROL_ENABLED` | `0` | Fallback for `control_enabled` |
+| `ASTRBOTEX_UPPER_CONTROL_HOST` | `127.0.0.1` | Fallback for `control_bind_host` |
+| `ASTRBOTEX_UPPER_CONTROL_PORT` | `8769` | Fallback for `control_port` |
+| `ASTRBOTEX_UPPER_CONTROL_PEER_ID` | empty | Fallback for the trusted `control_peer_id` |
+| `ASTRBOTEX_UPPER_ROBOT_ID` | empty | Fallback for `robot_id` |
+| `ASTRBOTEX_UPPER_MODEL_TIMEOUT_S` | `30` | Fallback for `model_timeout_s` |
+| `ASTRBOTEX_UPPER_DATA_ROOT` | plugin data dir | Overrides the upper-control data root (tests/isolated runs only) |
+
+Plugin configuration injected by the Host wins over these fallbacks.
 
 When both containers are attached to the same Docker bridge network, no host
 port publication is required. The EX side connects to `tcp://astrbot:8766`,
@@ -98,6 +113,87 @@ Vision channel:
 
 The old port `8766` is retained for the text channel, but it is no longer an
 HTTP server. HTTP requests sent to that port will not work.
+
+## Upper control (B10 wiring, default OFF)
+
+When `upper_enabled` is set, one trusted text input is classified by a private
+model into `speech_only` / `action_only` / `speech_and_action`, then a private
+generation model produces a public reply plus ordered execution segments. The
+public reply leaves through the original platform (or, for EX voice input, the
+original `interaction.reply` peer and its TTS chain). Execution segments leave
+only through the `control` channel. Both model calls are non-streaming and use
+the Host provider IDs below; no key is stored by this plugin.
+
+Assembly order is fixed: the three legacy channels and their one `TaskStore` →
+the upper components layered on that store → management API → optional `control`
+channel → input takeover. A missing module, a rejected setting, or a failed
+control bind degrades to "upper control unavailable" with a recorded reason; the
+legacy channels keep running.
+
+`upper_enabled` alone is not enough: a turn always ends at the control channel,
+so without `control_enabled` the plugin records `control_disabled` and leaves
+input takeover off rather than classifying an input it cannot deliver.
+
+| Config key | Default | Meaning |
+|------------|---------|---------|
+| `upper_enabled` | `false` | Master switch for classification and takeover |
+| `routing_provider_id` | empty | Host provider ID used for classification |
+| `generation_provider_id` | empty | Host provider ID used for content generation |
+| `control_enabled` | `false` | Bind the fourth channel and allow injection |
+| `control_bind_host` | `127.0.0.1` | Control ROUTER bind address |
+| `control_port` | `8769` | Control ROUTER port |
+| `control_peer_id` | empty | Exact trusted EX DEALER identity; never inferred from a model |
+| `robot_id` | empty | Robot identity for the injected batch |
+| `control_route_ref` | `upper-control` | Route id EX checks against its registered set |
+| `model_timeout_s` | `30` | Per-call budget for classification and generation |
+
+**Management page.** The integrated B07/B08 page appears as "上位控制" in the
+Host's native plugin pages. Its ten management APIs are available while both
+feature switches are off, before robot/peer configuration, and while EX is offline.
+Settings, prompts and descriptions persist locally; saving never calls a model
+or sends a control task. The Host repository remains a read-only dependency.
+
+Provider IDs, model timeout, prompt edits and `upper_enabled` apply to the next
+input. Each input freezes its own model settings. Control connection changes
+require reloading the plugin. Text/voice replies use the original text peer;
+executable segments use the independently configured control peer.
+
+Complete B11 verification requires a real disposable Dashboard via `--host-url`
+and authenticated Playwright storage. The real mode opens the Dashboard route,
+iframe and bridge. A missing or failed mandatory page stage yields `partial`
+and exits non-zero. See `docs/upper-control-deploy.md` for commands and limits.
+
+**Session binding.** EX compares the injected `ex_session` against the session it
+advertises and refuses a mismatch, so `ASTRBOTEX_SESSION_ID` must be the same on
+both sides. An EX voice event carries its own session; any other input uses the
+plugin's configured one.
+
+**Takeover rules.** Only already-woken text messages are considered. Registered
+commands (`/ex_task`, `/ex_status`, …) keep their priority and are never
+classified. Non-text input, and the original STT path, keep their existing
+handling — the decision runs on the transcribed text. A session with an active
+legacy control task is refused with `input_busy` instead of preempting that
+lease. One Host event produces at most one classification: the default LLM run
+and the legacy `manage_astrbotex_task` / `submit_astrbotex_proposal` tools are
+suppressed for that input, and a failure is suppressed too rather than falling
+back to a second reply.
+
+**Where the input came from.** `TrustedUpperInput` is issued by the framework
+from the Host event and the deployment config only: robot, user, session, route
+and the idempotency key never come from message content, model output or a Page
+body. A repeated Host event, or a new event carrying the same Host message id,
+is claimed once and never re-generated.
+
+**Delivery states.** `pending` means the segment is stored locally and not sent.
+`received` means EX recorded the batch. `injected` means the batch crossed the
+configured backend input boundary. `rejected` is a determinate refusal. Neither
+`received` nor `injected` is execution feedback: `delivery_unknown` means the
+batch may or may not have arrived, and nothing is retried automatically.
+
+**Explicitly not implemented in this round:** execution feedback uplink,
+automatic suffix sending, error replanning, parameter completion, ROS/low-level
+control, physical action, task success judgement, and A/C comparison. Handshake
+and delivery receipts prove delivery only.
 
 ## Private task planning (B05/B06, default OFF)
 

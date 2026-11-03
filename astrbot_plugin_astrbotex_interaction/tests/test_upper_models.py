@@ -225,8 +225,8 @@ class CallShapeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(call["stream"], False)
         self.assertEqual(call["system_prompt"], "ROUTING-SPEC")
         self.assertEqual(call["chat_provider_id"], "prov-1")
-        tools = call["tools"]
-        names = [tool["name"] for tool in tools]
+        # The Host expects a ToolSet of FunctionTool objects, not dicts.
+        names = [tool.name for tool in call["tools"]]
         self.assertEqual(names, [ROUTING_TOOL])
 
     async def test_generate_exposes_only_emit_upper_result(self):
@@ -237,7 +237,7 @@ class CallShapeTests(unittest.IsolatedAsyncioTestCase):
         call = host.calls[0]
         self.assertIs(call["stream"], False)
         self.assertEqual(call["system_prompt"], "PLANNING-SPEC")
-        names = [tool["name"] for tool in call["tools"]]
+        names = [tool.name for tool in call["tools"]]
         self.assertEqual(names, [EMIT_TOOL])
         # The old planning / proposal / execution tools must not be reachable.
         for forbidden in ("manage_astrbotex_task", "proposal", "submit_current_goal", "save_plan"):
@@ -546,6 +546,39 @@ class RealHostSmokeTests(unittest.TestCase):
         # When the Host is present the integration smoke belongs to B11, which
         # owns the real cross-end run.
         self.assertTrue(hasattr(upper_models, "UpperModels"))
+
+
+class FrozenTurnSettingsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_timeout_can_increase_without_changing_other_turns(self):
+        host = FakeHost([])
+        async def slow_response(**kwargs):
+            await asyncio.sleep(0.03)
+            return probabilities(0.9, 0.05, 0.05)
+        host.llm_generate = slow_response
+        models = UpperModels(host, timeout_s=0.001)
+        turn = models.for_turn(timeout_s=0.5, origin="origin-next-input")
+        self.assertEqual((await turn.classify("input", snapshot())).route, "speech_only")
+        self.assertEqual(host.current_calls, ["origin-next-input"])
+        with self.assertRaises(ModelError) as caught:
+            await models.for_turn(timeout_s=0.001).classify("input", snapshot())
+        self.assertEqual(caught.exception.code, ErrorCode.GENERATION_TIMEOUT)
+
+    async def test_bound_turn_shares_model_invalidation(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        host = FakeHost([])
+        async def delayed(**kwargs):
+            entered.set()
+            await release.wait()
+            return probabilities(0.9, 0.05, 0.05)
+        host.llm_generate = delayed
+        models = UpperModels(host)
+        task = asyncio.create_task(models.for_turn(timeout_s=2).classify("input", snapshot()))
+        await asyncio.wait_for(entered.wait(), 1)
+        models.invalidate()
+        release.set()
+        with self.assertRaises(ModelError) as caught:
+            await task
+        self.assertEqual(caught.exception.code, ErrorCode.GENERATION_STALE)
 
 
 if __name__ == "__main__":

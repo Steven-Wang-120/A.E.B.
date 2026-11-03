@@ -434,8 +434,8 @@ def _settings_view(repo: SettingsRepository) -> _SettingsView:
     revision: Any = None
     sources: dict[str, str] = {}
 
-    if isinstance(raw, Mapping) and "values" in raw:
-        inner = raw.get("values")
+    if isinstance(raw, Mapping) and ("settings" in raw or "values" in raw):
+        inner = raw.get("settings", raw.get("values"))
         values = dict(inner) if isinstance(inner, Mapping) else {}
         revision = raw.get("revision")
         maybe_sources = raw.get("sources")
@@ -444,7 +444,7 @@ def _settings_view(repo: SettingsRepository) -> _SettingsView:
     elif isinstance(raw, Mapping):
         values = dict(raw)
     else:
-        inner = getattr(raw, "values", None)
+        inner = getattr(raw, "settings", getattr(raw, "values", None))
         if isinstance(inner, Mapping):
             values = dict(inner)
         revision = getattr(raw, "revision", None)
@@ -833,9 +833,9 @@ class UpperApi:
             code = getattr(exc, "code", None)
             if code == "revision_conflict":
                 raise UpperApiError("revision_conflict", "目录或设置已被其他页面更新") from None
-            if code in ("not_found", "unknown_action"):
+            if code in ("not_found", "unknown_action", "action_not_found"):
                 raise UpperApiError("not_found", "未找到对应条目") from None
-            if code in ("invalid_record", "invalid_settings", "invalid_field"):
+            if code in ("invalid_record", "invalid_settings", "invalid_field", "invalid_action", "duplicate_parameter"):
                 raise UpperApiError("invalid_request", "提交内容不符合目录规则") from None
             raise UpperApiError("dependency_unavailable", f"{label} 暂时不可用") from None
 

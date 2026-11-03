@@ -275,6 +275,13 @@ class UpperModels:
         self._clock = clock
         self._fence = 0
 
+    def for_turn(self, *, timeout_s: float | None = None, origin: str = "") -> "_UpperModelTurn":
+        """Freeze this input's timeout/origin while retaining the shared cancel fence."""
+        budget = self._timeout_s if timeout_s is None else float(timeout_s)
+        if not 0 < budget <= 600:
+            _fail(ErrorCode.GENERATION_ERROR, "timeout_s must be finite and in (0, 600]")
+        return _UpperModelTurn(self, budget, origin)
+
     # -- fence ------------------------------------------------------------
 
     @property
@@ -374,7 +381,7 @@ class UpperModels:
                 remaining,
             )
         except (asyncio.TimeoutError, TimeoutError):
-            _fail(ErrorCode.GENERATION_TIMEOUT, f"the call exceeded {self._timeout_s}s")
+            _fail(ErrorCode.GENERATION_TIMEOUT, "the call exceeded its frozen turn deadline")
         except ModelError:
             raise
         except Exception as exc:
@@ -425,13 +432,15 @@ class UpperModels:
         provider_id: str | None = None,
         *,
         origin: str = "",
+        timeout_s: float | None = None,
     ) -> ClassificationResult:
         """Return the framework's route decision, never the model's."""
         self._require_input(input_text)
         resolved, model_id = self._resolve_provider(provider_id, origin)
         token = self._fence
         started = self._clock()
-        deadline = started + self._timeout_s
+        budget = self._timeout_s if timeout_s is None else self.for_turn(timeout_s=timeout_s).timeout_s
+        deadline = started + budget
 
         response = await self._call(
             provider_id=resolved,
@@ -496,6 +505,7 @@ class UpperModels:
         provider_id: str | None = None,
         *,
         origin: str = "",
+        timeout_s: float | None = None,
     ) -> GenerationResult:
         """Collect exactly one ``emit_upper_result`` payload."""
         self._require_input(input_text)
@@ -504,7 +514,8 @@ class UpperModels:
         resolved, model_id = self._resolve_provider(provider_id, origin)
         token = self._fence
         started = self._clock()
-        deadline = started + self._timeout_s
+        budget = self._timeout_s if timeout_s is None else self.for_turn(timeout_s=timeout_s).timeout_s
+        deadline = started + budget
 
         contexts: list[Any] = [_message("user", input_text)]
         tools = _toolset((EMIT_TOOL_SPEC,))
@@ -616,3 +627,18 @@ def _hash_text(text: str) -> str:
 def route_order() -> tuple[str, ...]:
     """Expose the fixed tie order so callers do not re-derive it."""
     return ROUTE_TIE_ORDER
+
+
+@dataclass(frozen=True)
+class _UpperModelTurn:
+    models: UpperModels
+    timeout_s: float
+    origin: str
+
+    async def classify(self, *args: Any, **kwargs: Any) -> ClassificationResult:
+        return await self.models.classify(*args, **kwargs, timeout_s=self.timeout_s,
+                                          origin=self.origin)
+
+    async def generate(self, *args: Any, **kwargs: Any) -> GenerationResult:
+        return await self.models.generate(*args, **kwargs, timeout_s=self.timeout_s,
+                                          origin=self.origin)

@@ -28,8 +28,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PAGE_ROOT = path.resolve(HERE, "../../pages/upper-control");
-const NOT_RUN_FILE = path.join(HERE, "upper_control.NOT_RUN.txt");
-const ARTIFACT_DIR = path.join(HERE, "artifacts");
+const ARTIFACT_DIR = process.env.UPPER_UI_EVIDENCE_DIR || path.join(HERE, "artifacts");
+const NOT_RUN_FILE = path.join(ARTIFACT_DIR, "upper_control.NOT_RUN.txt");
 const EVIDENCE_FILE = path.join(ARTIFACT_DIR, "upper_control_evidence.json");
 const PLUGIN_NAME = "astrbot_plugin_astrbotex_interaction";
 
@@ -99,6 +99,7 @@ function markNotRun(reason, extra = {}) {
     "A NOT_RUN result must not be reported as a pass.",
   ];
   try {
+    fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
     fs.writeFileSync(NOT_RUN_FILE, lines.join("\n"), "utf8");
   } catch {
     /* evidence file is best effort */
@@ -553,19 +554,31 @@ async function openRealHostPage(browser) {
     viewport: VIEWPORT_WIDE,
     storageState: storage || undefined,
   });
+  // The Host's first-use announcement is outside this plugin's acceptance scope.
+  await context.addInitScript(() => {
+    if (window === window.top) localStorage.setItem("astrbot:first_notice_seen:v1", "1");
+  });
   if (cookie && !storage) {
     const url = new URL(process.env.UPPER_HOST_URL);
+    await context.addInitScript((token) => {
+      if (window === window.top) localStorage.setItem("token", token);
+    }, cookie);
     await context.addCookies([
-      { name: "astrbot_token", value: cookie, domain: url.hostname, path: "/" },
+      { name: process.env.UPPER_HOST_COOKIE_NAME || "astrbot_dashboard_jwt",
+        value: cookie, domain: url.hostname, path: "/" },
     ]);
   }
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
-  const url = `${process.env.UPPER_HOST_URL.replace(/\/$/, "")}/api/plugin/page/content/${PLUGIN_NAME}/upper-control/`;
+  const url = `${process.env.UPPER_HOST_URL.replace(/\/$/, "")}/#/plugin-page/${PLUGIN_NAME}/upper-control`;
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("#tab-actions");
-  return { context, page, errors };
+  const iframe = await page.waitForSelector("iframe.plugin-page-frame", { timeout: 30000 });
+  const frame = await iframe.contentFrame();
+  assert.ok(frame, "Dashboard must create the real plugin iframe");
+  await frame.waitForSelector("#tab-actions");
+  await frame.waitForFunction(() => /rev \d+/.test(document.querySelector("#status-revision").textContent));
+  return { context, page, frame, errors };
 }
 
 async function setTheme(page, theme) {
@@ -692,9 +705,13 @@ after(async () => {
   if (runtime.server) await new Promise((resolve) => runtime.server.close(resolve));
 });
 
+function fakeTest(name, callback) {
+  if (MODE !== "real_host") test(name, callback);
+}
+
 /* ─────────────────────────── tests ────────────────────────────────────── */
 
-test("boots with four areas and the runtime status chips", async (t) => {
+fakeTest("boots with four areas and the runtime status chips", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   const { context, page, errors } = await openFakePage(runtime.browser, fixture);
@@ -710,7 +727,7 @@ test("boots with four areas and the runtime status chips", async (t) => {
   }
 });
 
-test("creates an action, saves it, and it survives a reload", async (t) => {
+fakeTest("creates an action, saves it, and it survives a reload", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   let session = await openFakePage(runtime.browser, fixture);
@@ -747,7 +764,7 @@ test("creates an action, saves it, and it survives a reload", async (t) => {
   }
 });
 
-test("edits, disables and deletes an entry", async (t) => {
+fakeTest("edits, disables and deletes an entry", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   const { context, page } = await openFakePage(runtime.browser, fixture);
@@ -782,7 +799,7 @@ test("edits, disables and deletes an entry", async (t) => {
   }
 });
 
-test("skill level hides the executable id and previews text safely", async (t) => {
+fakeTest("skill level hides the executable id and previews text safely", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   fixture.exState = "online";
@@ -804,7 +821,7 @@ test("skill level hides the executable id and previews text safely", async (t) =
   }
 });
 
-test("prompts save independently and report their source", async (t) => {
+fakeTest("prompts save independently and report their source", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   const { context, page } = await openFakePage(runtime.browser, fixture);
@@ -836,7 +853,7 @@ test("prompts save independently and report their source", async (t) => {
   }
 });
 
-test("provider and channel saves flag the fields that need a reload", async (t) => {
+fakeTest("provider and channel saves flag the fields that need a reload", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   const { context, page } = await openFakePage(runtime.browser, fixture);
@@ -873,7 +890,7 @@ test("provider and channel saves flag the fields that need a reload", async (t) 
   }
 });
 
-test("revision conflict keeps the draft and offers reload or copy", async (t) => {
+fakeTest("revision conflict keeps the draft and offers reload or copy", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   const first = await openFakePage(runtime.browser, fixture);
@@ -905,7 +922,7 @@ test("revision conflict keeps the draft and offers reload or copy", async (t) =>
   }
 });
 
-test("503 and network failures keep every input", async (t) => {
+fakeTest("503 and network failures keep every input", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   const { context, page } = await openFakePage(runtime.browser, fixture);
@@ -926,7 +943,7 @@ test("503 and network failures keep every input", async (t) => {
   }
 });
 
-test("records show delivery phases without claiming execution", async (t) => {
+fakeTest("records show delivery phases without claiming execution", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   fixture.plans = [
@@ -972,7 +989,7 @@ test("records show delivery phases without claiming execution", async (t) => {
   }
 });
 
-test("layout holds at 1280px and 390px, in both themes", async (t) => {
+fakeTest("layout holds at 1280px and 390px, in both themes", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   fixture.records.push({
@@ -1046,7 +1063,7 @@ test("layout holds at 1280px and 390px, in both themes", async (t) => {
   }
 });
 
-test("unsaved changes are guarded before switching areas", async (t) => {
+fakeTest("unsaved changes are guarded before switching areas", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   const { context, page } = await openFakePage(runtime.browser, fixture);
@@ -1068,7 +1085,7 @@ test("unsaved changes are guarded before switching areas", async (t) => {
   }
 });
 
-test("captures the operator walkthrough with its API assertions", async (t) => {
+fakeTest("captures the operator walkthrough with its API assertions", async (t) => {
   if (!requireRuntime(t)) return;
   const fixture = createFixture();
   fixture.plans = [
@@ -1213,28 +1230,108 @@ test("captures the operator walkthrough with its API assertions", async (t) => {
   assert.ok(evidence.every((entry) => entry.file), "every walkthrough step must produce a screenshot");
 });
 
-test("real Host wiring (only in real_host mode)", async (t) => {
-  if (MODE !== "real_host") {
-    t.skip("NOT_RUN: real_host mode not selected (set UPPER_UI_MODE=real_host)");
-    return;
-  }
+if (MODE === "real_host") test("real Host page: configure offline, persist, conflict and preserve failed drafts", async (t) => {
   if (!requireRuntime(t)) return;
-  const session = await openRealHostPage(runtime.browser);
+  const first = await openRealHostPage(runtime.browser);
+  let second;
+  const endpoint = `${process.env.UPPER_HOST_URL.replace(/\/$/, "")}/api/v1/plugins/extensions/${PLUGIN_NAME}`;
   try {
-    await session.page.waitForSelector("#status-revision");
-    const revision = await session.page.textContent("#status-revision");
-    assert.match(revision, /rev \d+/);
+    const settings = await first.frame.evaluate(async () => {
+      const response = await window.AstrBotPluginPage.apiGet("upper/settings");
+      return response;
+    });
+    assert.equal(typeof settings.revision, "number");
+    assert.equal(settings.settings.upper_enabled, false, "use a disposable, feature-off Host");
+    assert.equal(settings.runtime.control_state, "stopped");
 
-    await session.page.click("#tab-actions");
-    const response = await session.page.waitForResponse((item) =>
-      item.url().includes(`/${PLUGIN_NAME}/upper/actions`),
-    );
+    const anonymous = await runtime.browser.newContext();
+    try {
+      for (const path of ["upper/settings", "upper/actions", "upper/prompts", "upper/plans"]) {
+        const response = await anonymous.request.get(`${endpoint}/${path}`);
+        assert.ok([401, 403].includes(response.status()), `anonymous ${path} must fail`);
+      }
+      const response = await anonymous.request.post(`${endpoint}/upper/settings/save`, {
+        data: { expected_revision: settings.revision, settings: { upper_enabled: true } },
+      });
+      assert.ok([401, 403].includes(response.status()), "anonymous writes must fail");
+    } finally {
+      await anonymous.close();
+    }
+
+    const name = `Host offline persistence ${Date.now()}`;
+    await newActionDraft(first.frame);
+    await fillAction(first.frame, { name, level: "skill", skill: "# Host fixture\n仅验证目录，不执行。" });
+    const savedResponse = first.page.waitForResponse((r) => r.url().endsWith("/upper/actions/save") && r.request().method() === "POST");
+    await first.frame.click("#btn-save-action");
+    const response = await savedResponse;
     assert.equal(response.status(), 200);
     const body = await response.json();
-    assert.ok(Array.isArray(body.actions));
-    assert.ok(!("data" in body), "business payload must not use a top-level data key");
-    assert.deepEqual(session.errors, []);
+    assert.ok(body.action_ref);
+    assert.ok(!("data" in body), "Host endpoint returns the business object to its bridge");
+    await first.frame.waitForFunction(() => document.querySelector("#save-state").textContent.includes("已保存"));
+    await first.page.reload();
+    const refreshed = await first.page.waitForSelector("iframe.plugin-page-frame");
+    first.frame = await refreshed.contentFrame();
+    await first.frame.waitForSelector(".action-item-name");
+    assert.ok((await first.frame.locator(".action-item-name").allTextContents()).includes(name));
+
+    await first.frame.click("#tab-settings");
+    const newTimeout = settings.settings.model_timeout_s === 31 ? "32" : "31";
+    await first.frame.fill("#field-timeout", newTimeout);
+    await first.frame.click("#btn-save-settings");
+    await first.frame.waitForFunction(() => document.querySelector("#settings-save-state").textContent.includes("已保存"));
+    await first.page.reload();
+    first.frame = await (await first.page.waitForSelector("iframe.plugin-page-frame")).contentFrame();
+    await first.frame.click("#tab-settings");
+    await first.frame.waitForFunction((value) => document.querySelector("#field-timeout").value === value, newTimeout);
+
+    await first.frame.click("#tab-prompts");
+    const prompt = `真实 Host 提示词持久化 ${Date.now()}`;
+    await first.frame.fill("#prompt-routing", prompt);
+    const promptSaved = first.page.waitForResponse((r) => r.url().endsWith("/upper/prompts/save"));
+    await first.frame.click('[data-role="save"][data-kind="routing"]');
+    assert.equal((await promptSaved).status(), 200);
+    await first.page.reload();
+    first.frame = await (await first.page.waitForSelector("iframe.plugin-page-frame")).contentFrame();
+    await first.frame.click("#tab-prompts");
+    await first.frame.waitForFunction((value) => document.querySelector("#prompt-routing").value === value, prompt);
+    await first.frame.click("#tab-actions");
+
+    // Both pages hold the same revision. Only the first save may advance it.
+    second = await openRealHostPage(runtime.browser);
+    await newActionDraft(first.frame);
+    await fillAction(first.frame, { name: `${name} first`, level: "skill" });
+    await newActionDraft(second.frame);
+    await fillAction(second.frame, { name: `${name} stale`, level: "skill" });
+    await first.frame.click("#btn-save-action");
+    await first.frame.waitForFunction(() => document.querySelector("#save-state").textContent.includes("已保存"));
+    await second.frame.click("#btn-save-action");
+    await second.frame.waitForSelector("#banner:not([hidden])");
+    assert.match(await second.frame.textContent("#banner-text"), /其他页面更新/);
+    assert.equal(await second.frame.inputValue("#field-name"), `${name} stale`);
+
+    // Inject only the response failure, while keeping the real iframe/bridge.
+    await first.page.route("**/upper/actions/save", (route) => route.fulfill({
+      status: 503, contentType: "application/json",
+      body: JSON.stringify({ status: "error", message: "[UPPER:dependency_unavailable] fixture failure" }),
+    }));
+    await newActionDraft(first.frame);
+    await fillAction(first.frame, { name: `${name} preserved`, level: "skill" });
+    await first.frame.click("#btn-save-action");
+    await first.frame.waitForSelector("#banner:not([hidden])");
+    assert.match(await first.frame.textContent("#banner-text"), /依赖/);
+    assert.equal(await first.frame.inputValue("#field-name"), `${name} preserved`);
+    await first.page.unroute("**/upper/actions/save");
+    await first.page.route("**/upper/actions/save", (route) => route.abort("failed"));
+    await first.frame.click("#btn-save-action");
+    await first.frame.waitForFunction(() => document.querySelector("#save-state").textContent.includes("草稿已保留"));
+    assert.equal(await first.frame.inputValue("#field-name"), `${name} preserved`);
+    assert.deepEqual(first.errors, []);
+    fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+    await first.page.screenshot({ path: path.join(ARTIFACT_DIR, "real-host.png") });
+    evidence.push({ file: "real-host.png", area: "real_host", note: "feature-off persistence, conflicts, anonymous refusal and failed draft retention", assertion: "Page→bridge→API→store" });
   } finally {
-    await session.context.close();
+    if (second) await second.context.close();
+    await first.context.close();
   }
 });

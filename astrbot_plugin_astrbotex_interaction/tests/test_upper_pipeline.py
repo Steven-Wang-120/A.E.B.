@@ -62,9 +62,10 @@ class FakeModels:
 
 class FakePrompts:
     def build(self, settings_snapshot, catalog_snapshot):
+        # Field names follow B02's PromptSnapshot, which is what B10 injects.
         return {"routing_prompt": "routing", "planning_prompt": "planning",
-                "catalog_version": "catalog-1", "prompt_hash": "prompt-1",
-                "settings_hash": "settings-1"}
+                "catalog_version": "catalog-1", "content_hash": "prompt-1",
+                "settings_version": "settings-1"}
 
 
 class FakeSettings:

@@ -262,6 +262,14 @@ class UpperPipeline:
             settings_snapshot = self.settings.load()
             catalog_snapshot = self.catalog.snapshot()
             prompt_snapshot = self.prompts.build(settings_snapshot, catalog_snapshot)
+            values_snapshot = _field(settings_snapshot, "settings", settings_snapshot)
+            routing_provider_id = _field(values_snapshot, "routing_provider_id", self.routing_provider_id)
+            generation_provider_id = _field(values_snapshot, "generation_provider_id", self.generation_provider_id)
+            models = self.models
+            bind_turn = getattr(models, "for_turn", None)
+            if callable(bind_turn):
+                models = bind_turn(timeout_s=_field(values_snapshot, "model_timeout_s", None),
+                                   origin=values["origin"])
         except Exception as exc:  # noqa: BLE001
             self._reject(record["input_key"], generation, "config_invalid")
             self._emit("config_invalid", error=str(exc))
@@ -270,8 +278,8 @@ class UpperPipeline:
 
         # Decide, then generate.  Both are private: no streaming, no side effects.
         try:
-            probabilities = await self.models.classify(
-                values["input_text"], prompt_snapshot, self.routing_provider_id)
+            probabilities = await models.classify(
+                values["input_text"], prompt_snapshot, routing_provider_id)
         except Exception as exc:  # noqa: BLE001
             self._reject(record["input_key"], generation, "decision_error")
             self._emit("decision_error", error=str(exc))
@@ -291,8 +299,8 @@ class UpperPipeline:
                                 error_code="generation_stale")
 
         try:
-            generated = await self.models.generate(
-                values["input_text"], route, prompt_snapshot, self.generation_provider_id)
+            generated = await models.generate(
+                values["input_text"], route, prompt_snapshot, generation_provider_id)
         except Exception as exc:  # noqa: BLE001
             self._reject(record["input_key"], generation, "generation_error")
             self._emit("generation_error", error=str(exc))
@@ -312,9 +320,9 @@ class UpperPipeline:
                 record["input_key"], composed, generation=generation,
                 settings_snapshot=settings_snapshot, catalog_snapshot=catalog_snapshot,
                 prompt_snapshot=prompt_snapshot,
-                settings_hash=_field(prompt_snapshot, "settings_hash", "") or "",
+                settings_hash=_field(prompt_snapshot, "settings_version", "") or "",
                 catalog_hash=_field(prompt_snapshot, "catalog_version", "") or "",
-                prompt_hash=_field(prompt_snapshot, "prompt_hash", "") or "")
+                prompt_hash=_field(prompt_snapshot, "content_hash", "") or "")
         except TaskError as exc:
             code = contract_code(exc.code)
             self._reject(record["input_key"], generation, code)

@@ -362,6 +362,35 @@ class SettingsEndpointTests(UpperApiTestCase):
 # --------------------------------------------------------------------------
 
 
+class RealSettingsEndpointTests(UpperApiTestCase):
+    async def test_real_settings_snapshot_read_save_reload_and_prompts(self):
+        from astrbot_plugin_astrbotex_interaction.upper_settings import SettingsRepository
+        class Config(dict):
+            def save_config(self):
+                self.saved = dict(self)
+        config = Config(routing_provider_id="router-real", model_timeout_s=45.0)
+        repository = SettingsRepository(config)
+        api, _ = self.build(settings=repository)
+        initial = self.assert_ok(await api.get_settings())
+        self.assertEqual(initial["settings"]["routing_provider_id"], "router-real")
+        self.assertEqual(initial["settings"]["model_timeout_s"], 45.0)
+        save, _ = self.build(settings=repository, body={"expected_revision": initial["revision"],
+            "settings": {"model_timeout_s": 46.0, "generation_provider_id": "generator-real"}})
+        saved = self.assert_ok(await save.save_settings())
+        rebuilt, _ = self.build(settings=SettingsRepository(config))
+        loaded = self.assert_ok(await rebuilt.get_settings())
+        self.assertEqual(loaded["settings"]["model_timeout_s"], 46.0)
+        self.assertEqual(loaded["settings"]["generation_provider_id"], "generator-real")
+        prompt, _ = self.build(settings=SettingsRepository(config), body={
+            "expected_revision": saved["revision"], "kind": "routing", "content": "saved prompt"})
+        self.assert_ok(await prompt.save_prompt())
+        read_prompt, _ = self.build(settings=SettingsRepository(config))
+        prompts = self.assert_ok(await read_prompt.get_prompts())
+        self.assertEqual(prompts["prompts"]["routing"]["content"], "saved prompt")
+        self.assertEqual(config.saved["model_timeout_s"], 46.0)
+
+
+
 class ProviderEndpointTests(UpperApiTestCase):
     async def test_providers_are_listed_without_secrets(self) -> None:
         api, _ = self.build(
@@ -795,6 +824,14 @@ class HostAdapterTests(unittest.TestCase):
 
 class IsolationTests(UpperApiTestCase):
     async def test_api_never_imports_pipeline_or_control_modules(self) -> None:
+        watched = {
+            f"astrbot_plugin_astrbotex_interaction.{module}"
+            for module in ("upper_pipeline", "control_channel", "upper_models", "upper_prompts")
+        }
+        # Snapshot first: another suite in the same process may already have
+        # imported these for its own reasons. What matters is that calling the
+        # API handlers adds none of them.
+        before = set(sys.modules)
         api, _ = self.build(
             body={"record": valid_record(), "expected_revision": 1},
             params={"limit": "5"},
@@ -805,12 +842,10 @@ class IsolationTests(UpperApiTestCase):
         await api.save_action()
         await api.get_prompts()
         await api.get_plans()
-        for module in ("upper_pipeline", "control_channel", "upper_models", "upper_prompts"):
-            self.assertNotIn(
-                f"astrbot_plugin_astrbotex_interaction.{module}",
-                sys.modules,
-                f"{module} must not be imported by the API layer",
-            )
+        imported = watched & (set(sys.modules) - before)
+        self.assertEqual(
+            imported, set(), "the API layer must not import the pipeline or control modules"
+        )
 
     async def test_responses_carry_no_stack_trace(self) -> None:
         class BrokenCatalog:

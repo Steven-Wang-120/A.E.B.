@@ -1,6 +1,7 @@
 """AEB-owned task state. Frozen decision wire models live in task_contracts."""
 from __future__ import annotations
 
+import dataclasses
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -14,9 +15,33 @@ class TaskError(ValueError):
         super().__init__(code)
 
 
+def plain(value: Any) -> Any:
+    """Convert frozen dataclasses and tuples into JSON-shaped values.
+
+    The budget walker in ``task_contracts`` only understands dict/list/scalar,
+    so a ``SettingsSnapshot`` or ``CatalogSnapshot`` handed to ``canonical``
+    used to be rejected as ``invalid_type``. Every snapshot B02/B04 produces is
+    a frozen dataclass, which made a plan impossible to persist at all.
+    """
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {field.name: plain(getattr(value, field.name))
+                for field in dataclasses.fields(value)}
+    if isinstance(value, dict):
+        return {key: plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [plain(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return [plain(item) for item in sorted(value, key=repr)]
+    return value
+
+
 def json_value(value: Any) -> Any:
-    if measure_json_budget(value):
-        raise TaskError("value_budget_exceeded")
+    value = plain(value)
+    violation = measure_json_budget(value)
+    if violation:
+        # Report the walker's own code: "invalid_type" and "value_budget_exceeded"
+        # are different failures and callers branch on them.
+        raise TaskError(violation)
     try:
         return json.loads(json.dumps(value, allow_nan=False, ensure_ascii=False))
     except (ValueError, TypeError, RecursionError) as exc:
