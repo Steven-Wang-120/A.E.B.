@@ -261,6 +261,18 @@ class SystemAcceptanceTests(unittest.IsolatedAsyncioTestCase):
             plan=self.aeb.components.store.get_plan(self.aeb.components.store.list_plans()[0]["plan_id"])
             body=json.loads(ex.captured[-1])
             self.assertEqual(body["state"]["instruction_input"],plan["batch"]["payload"])
+            from astrbot_plugin_astrbotex_interaction.upper_api import _plan_summary, _deliveries_projection
+            repository=plugin_module._UpperPlanRepository(self.aeb.components.store)
+            projected=repository.get_plan(plan["plan_id"])
+            summary,_,pending=_plan_summary(projected)
+            self.assertEqual(summary["delivery_phase"],"injected")
+            self.assertEqual(summary["sent_prefix"],count)
+            self.assertEqual(summary["catalog_version"],plan["catalog_hash"])
+            self.assertEqual(summary["prompt_version"],plan["prompt_hash"])
+            self.assertEqual(len(pending),total-count)
+            deliveries=_deliveries_projection(projected["deliveries"])
+            self.assertEqual(deliveries[0]["phase"],"injected")
+            self.assertTrue(deliveries[0]["attempted_at"])
             self.assertEqual([s["text"] for s in plan["segments"]],texts)
             self.assertEqual([s["text"] for s in body["state"]["instruction_input"]["segments"]],texts[:count])
             self.assertEqual([s["status"] for s in plan["segments"]][count:],["pending"]*(total-count))
@@ -407,3 +419,22 @@ class SystemAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         await self.aeb.plugin.take_over_upper_input(replay)
         self.assertEqual(len(attempts),1)
         record("public-send-failure",{"plan":plan,"send_attempts":len(attempts),"automatic_retry":False})
+
+    async def test_unreserved_plan_api_is_unsent_and_disk_errors_are_not_404(self):
+        from astrbot_plugin_astrbotex_interaction.upper_api import _plan_summary
+        upper=self.aeb.components.store
+        inbound,_=upper.claim_input(input_key="unsent-api-input",robot_id="robot-e2e",user_id="u",session_id="s")
+        result=plan_action(["x","y","z"],2)
+        result["route"]="action_only"
+        plan=upper.save_result(inbound["input_key"],result,generation=inbound["generation"],
+            catalog_hash="catalog",prompt_hash="prompt",settings_hash="settings")
+        repository=plugin_module._UpperPlanRepository(upper)
+        summary,_,pending=_plan_summary(repository.get_plan(plan["plan_id"]))
+        self.assertEqual(summary["delivery_phase"],"unsent")
+        self.assertEqual(summary["sent_prefix"],0)
+        self.assertEqual(len(pending),3)
+        self.assertIsNone(repository.get_plan("missing-plan"))
+        class FailedStore:
+            def get_plan(self,plan_id): raise OSError("disk unavailable")
+        with self.assertRaises(OSError):
+            plugin_module._UpperPlanRepository(FailedStore()).get_plan("any")

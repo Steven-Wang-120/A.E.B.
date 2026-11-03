@@ -584,11 +584,18 @@ async function openRealHostPage(browser) {
   }
   const page = await context.newPage();
   const errors = [];
+  const requests = [];
   page.on("pageerror", (error) => errors.push(String(error)));
+  page.on("response", (response) => {
+    if (response.url().includes("/upper/")) requests.push({
+      url: response.url().split("/upper/")[1], status: response.status(),
+      method: response.request().method(), body: response.request().postData(),
+    });
+  });
   const url = `${process.env.UPPER_HOST_URL.replace(/\/$/, "")}/#/plugin-page/${PLUGIN_NAME}/upper-control`;
   await page.goto(url, { waitUntil: "domcontentloaded" });
   const frame = await waitRealHostFrame(page);
-  return { context, page, frame, errors };
+  return { context, page, frame, errors, requests };
 }
 
 async function setTheme(page, theme) {
@@ -1364,6 +1371,9 @@ if (MODE === "real_host") test("real Host page: configure offline, persist, conf
     await first.page.screenshot({ path: path.join(ARTIFACT_DIR, "real-host.png") });
     evidence.push({ file: "real-host.png", area: "real_host", note: "feature-off persistence, conflicts, anonymous refusal and failed draft retention", assertion: "Page→bridge→API→store" });
   } finally {
+    fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+    fs.writeFileSync(path.join(ARTIFACT_DIR, "real-host-initial-requests.json"),
+      JSON.stringify([...first.requests, ...(second?.requests || [])], null, 2));
     if (second) await second.context.close();
     await first.context.close();
   }

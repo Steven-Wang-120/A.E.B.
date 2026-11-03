@@ -128,6 +128,9 @@ class FakeStore:
         self.task_store = task_store
         self.closed = 0
 
+    def get_plan(self, plan_id: str) -> Any:
+        raise plugin_module.TaskError("unknown_plan")
+
     def close(self) -> None:
         self.closed += 1
 

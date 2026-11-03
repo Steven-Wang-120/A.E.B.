@@ -659,6 +659,8 @@ class UpperStore:
             "phase": batch["phase"],
             "error_code": batch["error_code"],
             "fence": batch["fence"],
+            "created_at": batch["created_at"],
+            "updated_at": batch["updated_at"],
         }
 
     # ------------------------------------------------------------------

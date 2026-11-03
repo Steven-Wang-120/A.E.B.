@@ -250,3 +250,7 @@ The complete matrix is a wiring check, not a paid-model or hardware task test.
 Snapshot conversion is confined to `upper_store.py`; legacy `task_models.py`
 retains its source-baseline behavior. An explicit public-sender `False` records
 `delivery_unknown` and never authorizes an automatic retry.
+
+Records translate the actual UpperStore batch phase, selected prefix and
+snapshot hashes to the management API. Before reservation the record is
+`unsent` with zero sent segments; database failures remain dependency errors.

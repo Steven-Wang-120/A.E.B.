@@ -606,13 +606,42 @@ class _UpperPlanRepository:
         # One extra row decides has_more without a second query.
         probe = limit + 1 if limit < 200 else limit
         items = self._store.list_plans(limit=probe, offset=offset)
-        return {"plans": list(items)[:limit], "has_more": len(items) > limit}
+        return {"plans": [self._project(item) for item in list(items)[:limit]],
+                "has_more": len(items) > limit}
+
+    @staticmethod
+    def _project(raw: Any) -> Any:
+        if not isinstance(raw, Mapping):
+            return raw
+        item = dict(raw)
+        batch = item.get("batch")
+        item.setdefault("prompt_version", item.get("prompt_hash"))
+        item.setdefault("catalog_version", item.get("catalog_hash"))
+        if isinstance(batch, Mapping):
+            phase = batch.get("phase") or batch.get("status") or "delivery_unknown"
+            item.setdefault("delivery_phase", phase)
+            item.setdefault("sent_prefix", len(batch.get("segment_ids") or []))
+            item.setdefault("deliveries", [{
+                "batch_id": batch.get("batch_id"), "phase": phase,
+                "payload_hash": batch.get("payload_hash"),
+                "segment_ids": list(batch.get("segment_ids") or []),
+                "attempted_at": batch.get("created_at"),
+            }])
+        else:
+            # send_count is an intended prefix until a batch is reserved.
+            item.setdefault("delivery_phase", "unsent")
+            item.setdefault("sent_prefix", 0)
+            item.setdefault("deliveries", [])
+        return item
 
     def get_plan(self, plan_id: str) -> Any:
         try:
-            return self._store.get_plan(plan_id)
-        except Exception:  # noqa: BLE001 - "unknown plan" is a 404, not a 503
-            return None
+            raw = self._store.get_plan(plan_id)
+        except TaskError as exc:
+            if exc.code == "unknown_plan":
+                return None
+            raise
+        return self._project(raw)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._store, name)
