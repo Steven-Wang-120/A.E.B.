@@ -26,7 +26,7 @@
           <span id="status-ex-text">EX 未知</span>
         </span>
         <span class="chip chip-quiet" id="status-revision">rev —</span>
-        <button type="button" class="btn btn-ghost" id="btn-refresh">
+        <button type="button" class="btn btn-ghost" id="btn-refresh" disabled>
           <span data-i18n="pages.upper-control.refresh">刷新</span>
         </button>
       </div>
@@ -93,7 +93,7 @@
       </button>
     </nav>
 
-    <main id="main">
+    <main id="main" inert aria-busy="true">
       <!-- ── 动作目录 ─────────────────────────────────────────────── -->
       <section
         id="panel-actions"

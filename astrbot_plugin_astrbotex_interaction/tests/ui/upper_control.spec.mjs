@@ -549,6 +549,18 @@ async function openFakePage(browser, fixture, options = {}) {
   return { context, page, errors };
 }
 
+async function waitRealHostFrame(page) {
+  const iframe = await page.waitForSelector("iframe.plugin-page-frame", { timeout: 30000 });
+  const frame = await iframe.contentFrame();
+  assert.ok(frame, "Dashboard must create the real plugin iframe");
+  await frame.waitForFunction(() =>
+    window.AstrBotPluginPage && typeof window.AstrBotPluginPage.apiGet === "function" &&
+    /rev \d+/.test(document.querySelector("#status-revision")?.textContent || "") &&
+    document.querySelector("#main")?.inert === false &&
+    document.querySelector("#btn-refresh")?.disabled === false);
+  return frame;
+}
+
 async function openRealHostPage(browser) {
   const storage = process.env.UPPER_HOST_STORAGE;
   const cookie = process.env.UPPER_HOST_COOKIE;
@@ -575,12 +587,7 @@ async function openRealHostPage(browser) {
   page.on("pageerror", (error) => errors.push(String(error)));
   const url = `${process.env.UPPER_HOST_URL.replace(/\/$/, "")}/#/plugin-page/${PLUGIN_NAME}/upper-control`;
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  const iframe = await page.waitForSelector("iframe.plugin-page-frame", { timeout: 30000 });
-  const frame = await iframe.contentFrame();
-  assert.ok(frame, "Dashboard must create the real plugin iframe");
-  await frame.waitForSelector("#tab-actions");
-  await frame.waitForFunction(() => /rev \d+/.test(document.querySelector("#status-revision").textContent));
-  await frame.waitForSelector("#btn-refresh:not([disabled])");
+  const frame = await waitRealHostFrame(page);
   return { context, page, frame, errors };
 }
 
@@ -1297,9 +1304,7 @@ if (MODE === "real_host") test("real Host page: configure offline, persist, conf
     assert.ok(!("data" in body), "Host endpoint returns the business object to its bridge");
     await first.frame.waitForFunction(() => document.querySelector("#save-state").textContent.includes("已保存"));
     await first.page.reload();
-    const refreshed = await first.page.waitForSelector("iframe.plugin-page-frame");
-    first.frame = await refreshed.contentFrame();
-    await first.frame.waitForSelector("#btn-refresh:not([disabled])");
+    first.frame = await waitRealHostFrame(first.page);
     await first.frame.waitForSelector(".action-item-name");
     assert.ok((await first.frame.locator(".action-item-name").allTextContents()).includes(name));
 
@@ -1309,8 +1314,7 @@ if (MODE === "real_host") test("real Host page: configure offline, persist, conf
     await first.frame.click("#btn-save-settings");
     await first.frame.waitForFunction(() => document.querySelector("#settings-save-state").textContent.includes("已保存"));
     await first.page.reload();
-    first.frame = await (await first.page.waitForSelector("iframe.plugin-page-frame")).contentFrame();
-    await first.frame.waitForSelector("#btn-refresh:not([disabled])");
+    first.frame = await waitRealHostFrame(first.page);
     await first.frame.click("#tab-settings");
     await first.frame.waitForFunction((value) => document.querySelector("#field-timeout").value === value, newTimeout);
 
@@ -1321,8 +1325,7 @@ if (MODE === "real_host") test("real Host page: configure offline, persist, conf
     await first.frame.click('[data-role="save"][data-kind="routing"]');
     assert.equal((await promptSaved).status(), 200);
     await first.page.reload();
-    first.frame = await (await first.page.waitForSelector("iframe.plugin-page-frame")).contentFrame();
-    await first.frame.waitForSelector("#btn-refresh:not([disabled])");
+    first.frame = await waitRealHostFrame(first.page);
     await first.frame.click("#tab-prompts");
     await first.frame.waitForFunction((value) => document.querySelector("#prompt-routing").value === value, prompt);
     await first.frame.click("#tab-actions");
@@ -1457,8 +1460,7 @@ if (MODE === "real_host") test("real Host CRUD, prompts, reload and four viewpor
     assert.equal(reload.status,200,JSON.stringify(reload.body));
     assert.equal(reload.body.status,"ok",JSON.stringify(reload.body));
     await session.page.reload();
-    session.frame=await (await session.page.waitForSelector("iframe.plugin-page-frame")).contentFrame();
-    await session.frame.waitForSelector("#btn-refresh:not([disabled])");
+    session.frame=await waitRealHostFrame(session.page);
     catalog=await read("upper/actions");
     action=catalog.actions.find((a) => a.action_ref===created.action_ref);
     assert.equal(action.name,name);
