@@ -25,6 +25,7 @@ Delivery semantics, deliberately conservative:
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -67,6 +68,24 @@ REPLY_CLAIMED = "claimed"
 REPLY_SENDING = "sending"
 REPLY_SENT = "sent"
 REPLY_UNKNOWN = "delivery_unknown"
+
+
+def _snapshot_value(value: Any) -> Any:
+    """Convert frozen dataclasses and tuples into JSON-shaped values.
+
+    This adapter belongs only to upper-control persistence. Legacy task JSON
+    validation and its error codes retain their original behavior.
+    """
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {field.name: _snapshot_value(getattr(value, field.name))
+                for field in dataclasses.fields(value)}
+    if isinstance(value, dict):
+        return {key: _snapshot_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_snapshot_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return [_snapshot_value(item) for item in sorted(value, key=repr)]
+    return value
 
 
 def payload_hash(payload: dict[str, Any]) -> str:
@@ -437,9 +456,9 @@ class UpperStore:
                  canonical(normalized["probabilities"]), normalized["public_text"],
                  normalized["send_count"], len(normalized["segments"]), digest,
                  settings_hash, catalog_hash, prompt_hash,
-                 canonical(settings_snapshot) if settings_snapshot is not None else None,
-                 canonical(catalog_snapshot) if catalog_snapshot is not None else None,
-                 canonical(prompt_snapshot) if prompt_snapshot is not None else None,
+                 canonical(_snapshot_value(settings_snapshot)) if settings_snapshot is not None else None,
+                 canonical(_snapshot_value(catalog_snapshot)) if catalog_snapshot is not None else None,
+                 canonical(_snapshot_value(prompt_snapshot)) if prompt_snapshot is not None else None,
                  1, generation, PLAN_PLANNED, now, now),
             )
             for ordinal, text in enumerate(normalized["segments"]):

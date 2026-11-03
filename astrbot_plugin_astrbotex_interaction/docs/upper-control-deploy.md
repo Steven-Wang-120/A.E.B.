@@ -213,3 +213,40 @@ The real browser spec tests offline catalog persistence, settings/prompt saves a
 refreshes, anonymous read/write refusal, revision conflicts, and draft retention
 under injected HTTP/network failures. Scripted models and loopback receipts do
 not prove a live model, execution success, or the complete crash/restart matrix.
+
+## Offline system acceptance and forced process recovery
+
+The mandatory Host stage also runs `test_upper_acceptance.py` and
+`test_upper_crash_recovery.py`. In image mode the runner mounts both candidate
+repositories read-only and writes captures/projections under `system/` in the
+new evidence directory. Native Host mode uses the explicit AEB/EX/Host roots.
+No package or image is downloaded.
+
+The system matrix uses real `Context.llm_generate`, upper model result objects,
+the OneBot event serializer/send adapter, EX text ConnectionManager and
+InteractionCore, the control ROUTER/DEALER and real JevBackend HTTP transport.
+Only provider responses, the OneBot API peer, and audio providers/devices are
+local substitutes. R1-R5 run for both platform and voice, with replay and
+sentinel/counter assertions. S1-S4 capture the local HTTP model request and
+database snapshots; S4 retains its third segment across two timeout windows
+and restart. A wrong-session batch is refused without another model request.
+
+Crash tests start independent children, wait for durable gates, force kill
+them, then recover the same unchanged database/log in fresh interpreters.
+Gates cover reserve-before-send, send-before-receipt, EX consumption started,
+and public-send-before-confirmation. Recovery retains unknown states and does
+not resend/reconsume/re-speak; this is conservative delivery, not exactly-once.
+
+Real Dashboard tests additionally cover primitive/skill CRUD, parameters,
+both prompt overrides and builtin restoration, real plugin-manager reload,
+and light/dark 1280/390px layouts. Use only a disposable Host. Temporary
+dashboard credentials and Host databases must stay outside committed evidence.
+
+2026-11-03 acceptance also fixed the B03/B05 result boundary: classification
+probabilities and generated content are read from their production typed
+wrappers before validation and persistence. Model evidence remains private.
+The complete matrix is a wiring check, not a paid-model or hardware task test.
+
+Snapshot conversion is confined to `upper_store.py`; legacy `task_models.py`
+retains its source-baseline behavior. An explicit public-sender `False` records
+`delivery_unknown` and never authorizes an automatic retry.

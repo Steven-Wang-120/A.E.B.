@@ -135,7 +135,9 @@ class UpperOutputRouter:
             return {"sent": False, "reply": reply, "reason": "already_claimed"}
         self.store.record_public_delivery(reply["reply_id"], "sending")
         try:
-            await sender(reply["text"])
+            result = await sender(reply["text"])
+            if result is False:
+                raise TaskError("public_send_failed")
         except Exception:  # noqa: BLE001 - a failed send is not a retry permit
             self.store.record_public_delivery(reply["reply_id"], "delivery_unknown",
                                               error_code="public_send_failed")

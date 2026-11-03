@@ -1365,3 +1365,125 @@ if (MODE === "real_host") test("real Host page: configure offline, persist, conf
     await first.context.close();
   }
 });
+
+if (MODE === "real_host") test("real Host CRUD, prompts, reload and four viewport/theme combinations", async (t) => {
+  if (!requireRuntime(t)) return;
+  const session = await openRealHostPage(runtime.browser);
+  const requests = [];
+  session.page.on("response", async (response) => {
+    if (!response.url().includes("/upper/")) return;
+    requests.push({ url: response.url().split("/upper/")[1], status: response.status(),
+      method: response.request().method(), body: response.request().postData() });
+  });
+  const read = (path) => session.frame.evaluate((path) => window.AstrBotPluginPage.apiGet(path), path);
+  async function clickSave(selector, suffix) {
+    const saved = session.page.waitForResponse((r) => r.url().endsWith(suffix) && r.request().method() === "POST");
+    await session.frame.click(selector);
+    const response = await saved;
+    assert.equal(response.status(), 200, await response.text());
+    await session.frame.waitForSelector("#btn-refresh:not([disabled])");
+    return response.json();
+  }
+  try {
+    const name = `真实基础动作 ${Date.now()}`;
+    await newActionDraft(session.frame);
+    await fillAction(session.frame, {name, level:"primitive", actionId:"ex.acceptance.description"});
+    await session.frame.fill("#field-stages", "寻找、对齐、抓取");
+    await session.frame.fill("#field-skill", "# 独立说明\n只用于目录验收。\n".repeat(12));
+    await session.frame.click("#btn-add-param");
+    await session.frame.fill('[data-role="param-name"]', "distance");
+    await session.frame.fill('[data-role="param-description"]', "目标距离");
+    await session.frame.fill('[data-role="param-unit"]', "m");
+    await session.frame.check('[data-role="param-required"]');
+    const created = await clickSave("#btn-save-action", "/upper/actions/save");
+    let catalog = await read("upper/actions");
+    let action = catalog.actions.find((a) => a.action_ref === created.action_ref);
+    assert.equal(action.name,name);
+    assert.equal(action.parameters[0].unit,"m");
+    assert.equal(action.parameters[0].required,true);
+    assert.match(action.skill_markdown,/独立说明/);
+    await session.frame.fill("#field-description", "修改后的基础动作说明");
+    await session.frame.uncheck("#field-enabled");
+    await clickSave("#btn-save-action", "/upper/actions/save");
+    catalog = await read("upper/actions");
+    action = catalog.actions.find((a) => a.action_ref === created.action_ref);
+    assert.equal(action.enabled,false);
+    assert.equal(action.description,"修改后的基础动作说明");
+
+    // A distinct skill has no execution identity and is editable/deletable.
+    await newActionDraft(session.frame);
+    await fillAction(session.frame,{name:`${name} skill`,level:"skill",skill:"# 单独 Skill\n分阶段组织。"});
+    const skill = await clickSave("#btn-save-action", "/upper/actions/save");
+    catalog = await read("upper/actions");
+    assert.equal(catalog.actions.find((a) => a.action_ref===skill.action_ref).action_id,null);
+    await session.frame.fill("#field-skill","# 已编辑 Skill\n只描述，不执行。");
+    await clickSave("#btn-save-action", "/upper/actions/save");
+    await session.frame.click("#btn-delete-action");
+    await session.frame.waitForSelector("#confirm-dialog[open]");
+    await clickSave("#confirm-ok", "/upper/actions/delete");
+    catalog = await read("upper/actions");
+    assert.ok(!catalog.actions.some((a) => a.action_ref===skill.action_ref));
+
+    await session.frame.click("#tab-prompts");
+    for (const kind of ["routing","planning"]) {
+      const content=`# ${kind} 公共覆盖\n长中文与 Markdown **验收**。\n`.repeat(15);
+      await session.frame.fill(`#prompt-${kind}`,content);
+      await clickSave(`[data-role="save"][data-kind="${kind}"]`,"/upper/prompts/save");
+      const info=(await read("upper/prompts")).prompts[kind];
+      assert.equal(info.effective_content,content);
+      assert.equal(info.source,"override");
+      assert.match(info.hash,/^[a-f0-9]{64}$/);
+      await session.frame.click(`[data-role="preview"][data-kind="${kind}"]`);
+      assert.equal(await session.frame.textContent(`#preview-${kind}`),content);
+      await session.frame.click(`[data-role="restore"][data-kind="${kind}"]`);
+      await session.frame.waitForSelector("#confirm-dialog[open]");
+      await clickSave("#confirm-ok","/upper/prompts/save");
+      const restored=(await read("upper/prompts")).prompts[kind];
+      assert.equal(restored.content,"");
+      assert.equal(restored.source,"builtin");
+      assert.equal(restored.hash,restored.default_hash);
+    }
+    const providers=await read("upper/providers");
+    for (const provider of providers.providers) {
+      assert.ok(!Object.keys(provider).some((key) => /key|secret|token/i.test(key)));
+    }
+    // Real Host plugin manager unload/reload, not a browser-only refresh.
+    const reload=await session.page.evaluate(async (plugin) => {
+      const response=await fetch("/api/plugin/reload", {method:"POST",
+        headers:{"Content-Type":"application/json", Authorization:`Bearer ${localStorage.getItem("token")}`},
+        body:JSON.stringify({name:plugin})});
+      return {status:response.status,body:await response.json()};
+    },PLUGIN_NAME);
+    assert.equal(reload.status,200,JSON.stringify(reload.body));
+    assert.equal(reload.body.status,"ok",JSON.stringify(reload.body));
+    await session.page.reload();
+    session.frame=await (await session.page.waitForSelector("iframe.plugin-page-frame")).contentFrame();
+    await session.frame.waitForSelector("#btn-refresh:not([disabled])");
+    catalog=await read("upper/actions");
+    action=catalog.actions.find((a) => a.action_ref===created.action_ref);
+    assert.equal(action.name,name);
+    assert.equal(action.enabled,false);
+    assert.match(action.skill_markdown,/独立说明/);
+    for (const width of [1280,390]) {
+      await session.page.setViewportSize({width,height:900});
+      for (const theme of ["light","dark"]) {
+        await setTheme(session.frame,theme);
+        await session.frame.click("#tab-actions");
+        await session.frame.locator(".action-item").filter({hasText:name}).first().click();
+        await session.frame.click("#btn-preview-skill");
+        assert.ok((await horizontalOverflow(session.frame))<=1,`${width} ${theme} overflow`);
+        await session.frame.locator("#btn-save-action").scrollIntoViewIfNeeded();
+        await session.frame.locator("#btn-save-action").focus();
+        assert.equal(await session.frame.evaluate(()=>document.activeElement.id),"btn-save-action");
+        fs.mkdirSync(ARTIFACT_DIR,{recursive:true});
+        const file=`real-host-${width}-${theme}.png`;
+        await session.page.screenshot({path:path.join(ARTIFACT_DIR,file)});
+        evidence.push({file,area:"real_host",assertion:"real CRUD/reload, reachable save and no horizontal overflow"});
+      }
+    }
+    assert.deepEqual(session.errors,[]);
+    fs.writeFileSync(path.join(ARTIFACT_DIR,"real-host-requests.json"),JSON.stringify(requests,null,2));
+  } finally {
+    await session.context.close();
+  }
+});

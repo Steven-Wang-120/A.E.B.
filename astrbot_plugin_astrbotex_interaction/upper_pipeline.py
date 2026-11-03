@@ -287,7 +287,8 @@ class UpperPipeline:
                                 error_code="decision_error")
 
         try:
-            route = argmax_route(self._normalized_probabilities(probabilities))
+            probabilities = self._normalized_probabilities(probabilities)
+            route = argmax_route(probabilities)
         except TaskError as exc:
             code = contract_code(exc.code)
             self._reject(record["input_key"], generation, code)
@@ -307,6 +308,9 @@ class UpperPipeline:
             return self._finish(handled=False, suppress_default=False,
                                 error_code="generation_error")
 
+        # B03 returns GenerationResult(result=UpperResult, evidence=...).
+        # Keep evidence private and read only the validated content object.
+        generated = _field(generated, "result", generated)
         # The framework owns the route, never the model.
         composed = {
             "route": route,
@@ -436,4 +440,11 @@ class UpperPipeline:
 
     @staticmethod
     def _normalized_probabilities(raw: Any) -> dict[str, float]:
-        return normalize_probabilities(raw)
+        # Production B03 returns ClassificationResult with RouteProbabilities;
+        # substitute adapters may return the bare mapping. Validate both through
+        # the same strict finite-number/schema checks before framework argmax.
+        probabilities = _field(raw, "probabilities", raw)
+        to_dict = getattr(probabilities, "to_dict", None)
+        if callable(to_dict):
+            probabilities = to_dict()
+        return normalize_probabilities({"probabilities": probabilities})

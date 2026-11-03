@@ -101,6 +101,8 @@ AEB_UNIT_TESTS = [
 #: hide a green pipeline.
 AEB_API_TESTS = [
     "test_upper_api",
+    "test_upper_acceptance",
+    "test_upper_crash_recovery",
 ]
 
 EX_UNIT_TESTS = [
@@ -329,10 +331,20 @@ class Runner:
         # inside the disposable container and mount candidate source read-only.
         inner = [f"/aeb-src/{arg}" if arg.startswith(f"{PLUGIN_DIR}/") else arg
                  for arg in inner]
+        cross_test = next((name for name in AEB_API_TESTS[1:] if any(name in arg for arg in inner)), None)
+        extra = []
+        pythonpath = "/aeb-src"
+        if cross_test:
+            output = self.evidence / "system" / cross_test
+            output.mkdir(parents=True, exist_ok=True)
+            extra = ["-v", f"{self.ex_root}:/ex-src:ro",
+                     "-v", f"{output}:/acceptance-output",
+                     "-e", "UPPER_ACCEPTANCE_EVIDENCE=/acceptance-output"]
+            pythonpath += ":/ex-src"
         return [
             "docker", "run", "--rm", "--pull", "never", "--network", "none",
-            "-v", f"{root}:/aeb-src:ro",
-            "-e", "PYTHONPATH=/aeb-src", "-e", "PYTHONDONTWRITEBYTECODE=1",
+            "-v", f"{root}:/aeb-src:ro", *extra,
+            "-e", f"PYTHONPATH={pythonpath}", "-e", "PYTHONDONTWRITEBYTECODE=1",
             "-e", "ASTRBOTEX_UPPER_DATA_ROOT=/tmp/upper-data",
             "-e", "ASTRBOTEX_TASK_DB_PATH=/tmp/upper-data/tasks.sqlite3",
             "-w", "/tmp", self.args.host_image, "python", *inner,
@@ -663,6 +675,7 @@ class Runner:
             )
             for name in AEB_API_TESTS:
                 if not (self.aeb_root / PLUGIN_DIR / "tests" / f"{name}.py").exists():
+                    problems[f"tests/{name}.py"] = "B11"
                     continue
                 api_argv = [
                     *self.python_for(host=True),
@@ -680,7 +693,16 @@ class Runner:
                     api_argv = self.docker_argv(
                         self.aeb_root, api_argv[len(self.python_for(host=True)) :]
                     )
-                stage.commands.append(self.run(f"host:{name}", api_argv, self.aeb_root))
+                extra_env = None
+                if name in {"test_upper_acceptance", "test_upper_crash_recovery"} and not self.args.host_image:
+                    output = self.evidence / "system" / name
+                    output.mkdir(parents=True, exist_ok=True)
+                    roots = [self.aeb_root, self.ex_root]
+                    if self.host_root:
+                        roots.append(self.host_root)
+                    extra_env = {"PYTHONPATH": os.pathsep.join(map(str, roots)),
+                                 "UPPER_ACCEPTANCE_EVIDENCE": str(output)}
+                stage.commands.append(self.run(f"host:{name}", api_argv, self.aeb_root, extra_env=extra_env))
         self.close_stage(stage, required=True, missing=problems)
         return stage
 
@@ -889,12 +911,12 @@ class Runner:
             "cross_task_fixes": [
                 {
                     "owner": "B04",
-                    "file": "task_models.py",
+                    "file": "upper_store.py",
                     "defect": "json_value/canonical only accepted dict/list/scalars, so the "
                               "SettingsSnapshot/CatalogSnapshot/PromptSnapshot dataclasses B05 "
                               "passes were rejected as invalid_type and no plan could be saved.",
-                    "fix": "plain() converts frozen dataclasses, tuples and sets before the budget "
-                           "walk, and the walker's own error code is now reported.",
+                    "fix": "_snapshot_value() converts upper snapshots before canonical serialization; "
+                           "legacy task_models.py is identical to the source baseline.",
                 },
                 {
                     "owner": "B05",
@@ -948,6 +970,7 @@ class Runner:
             "known_issues": [
                 "A missing or failed mandatory stage makes the verdict partial and exits non-zero.",
                 "Host Python integration does not replace a real Dashboard page check.",
+                "Forced process recovery and production-adapter output checks are mandatory Host tests.",
                 "Host scope needs an importable Host checkout or a local image; no image is pulled.",
                 "Upper control requires control_enabled: without the control channel a turn could "
                 "classify an input and have nowhere to deliver, so takeover stays off.",
