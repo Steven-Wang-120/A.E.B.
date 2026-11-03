@@ -1,0 +1,12 @@
+aeb:test_upper_composition exit=0 tests=37 cwd=D:\Code\A.E.B-work\upper-b10-b11
+["docker", "run", "--rm", "--pull", "never", "--network", "none", "-v", "D:\\Code\\A.E.B-work\\upper-b10-b11:/aeb-src:ro", "-e", "PYTHONPATH=/aeb-src", "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "ASTRBOTEX_UPPER_DATA_ROOT=/tmp/upper-data", "-e", "ASTRBOTEX_TASK_DB_PATH=/tmp/upper-data/tasks.sqlite3", "-w", "/tmp", "local/astrbot:4.26.7-isolated", "python", "-B", "-m", "unittest", "discover", "-s", "/aeb-src/astrbot_plugin_astrbotex_interaction/tests", "-p", "test_upper_composition.py", "-v"]
+log=../../B11/repair-20261103/logs\010-aeb_test_upper_composition.log
+aeb:test_upper_e2e exit=0 tests=19 cwd=D:\Code\A.E.B-work\upper-b10-b11
+["docker", "run", "--rm", "--pull", "never", "--network", "none", "-v", "D:\\Code\\A.E.B-work\\upper-b10-b11:/aeb-src:ro", "-e", "PYTHONPATH=/aeb-src", "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "ASTRBOTEX_UPPER_DATA_ROOT=/tmp/upper-data", "-e", "ASTRBOTEX_TASK_DB_PATH=/tmp/upper-data/tasks.sqlite3", "-w", "/tmp", "local/astrbot:4.26.7-isolated", "python", "-B", "-m", "unittest", "discover", "-s", "/aeb-src/astrbot_plugin_astrbotex_interaction/tests", "-p", "test_upper_e2e.py", "-v"]
+log=../../B11/repair-20261103/logs\015-aeb_test_upper_e2e.log
+host:composition exit=0 tests=37 cwd=D:\Code\A.E.B-work\upper-b10-b11
+["docker", "run", "--rm", "--pull", "never", "--network", "none", "-v", "D:\\Code\\A.E.B-work\\upper-b10-b11:/aeb-src:ro", "-e", "PYTHONPATH=/aeb-src", "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "ASTRBOTEX_UPPER_DATA_ROOT=/tmp/upper-data", "-e", "ASTRBOTEX_TASK_DB_PATH=/tmp/upper-data/tasks.sqlite3", "-w", "/tmp", "local/astrbot:4.26.7-isolated", "python", "-B", "-m", "unittest", "discover", "-s", "/aeb-src/astrbot_plugin_astrbotex_interaction/tests", "-p", "test_upper_composition.py", "-v"]
+log=../../B11/repair-20261103/logs\017-host_composition.log
+page:upper_control exit=0 tests=1 cwd=D:\Code\A.E.B-work\upper-b10-b11
+["C:\\Users\\17088\\Desktop\\node-v24.15.0-win-x64\\node.EXE", "--test", "--test-reporter=tap", "D:\\Code\\A.E.B-work\\upper-b10-b11\\astrbot_plugin_astrbotex_interaction\\tests\\ui\\upper_control.spec.mjs"]
+log=../../B11/repair-20261103/logs\019-page_upper_control.log
