@@ -1,0 +1,45 @@
+{
+  "task_id": "B06",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "run_id": "20261102T1505Z",
+  "suites": [
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_control_channel.py -v",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "status": "PASS",
+      "layer": "real_zmq_loopback"
+    },
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_plugin_channels.py -v",
+      "tests": 1,
+      "failures": 0,
+      "errors": 1,
+      "exit_code": 1,
+      "status": "NOT_RUN",
+      "reason": "ModuleNotFoundError: astrbot (Host runtime not installed in this interpreter); identical failure on the untouched baseline worktree",
+      "layer": "real_host"
+    },
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_zmq_transport.py -v",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "status": "PASS",
+      "layer": "real_zmq_loopback",
+      "note": "shared transport regression"
+    }
+  ],
+  "acceptance_checks": {
+    "single_and_multi_segment_verbatim_ordered": "PASS - payload received equals the frozen payload byte-for-byte; ordinals [0,1] then [2]",
+    "same_batch_sent_once": "PASS - second inject returns duplicate=True, sent=False, one frame on the wire",
+    "wrong_peer_wrong_session_wrong_reply_to_wrong_hash": "PASS - peer_unavailable / session_mismatch / receipt_batch_mismatch / receipt_request_mismatch / receipt_hash_mismatch; all refuse or mark unknown, none report success",
+    "timeout_unknown_no_second_send": "PASS - delivery_unknown, exactly one frame, retry replays the recorded outcome",
+    "control_congestion_leaves_text_usable": "PASS - a silent control peer holds inject for 3 s while a real text ROUTER answers interaction.message in under 1 s",
+    "close_releases_port_no_dangling_tasks": "PASS - pending inject resolves, is_running False, port rebindable, start/close repeatable",
+    "legacy_three_channels": "NOT_RUN - see test_plugin_channels above; test_zmq_transport passes and the congestion test drives a real text ROUTER alongside control"
+  }
+}

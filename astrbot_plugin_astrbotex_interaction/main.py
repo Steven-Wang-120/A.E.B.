@@ -3,13 +3,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import inspect
 import json
 import uuid
 import os
+import re
 import tempfile
+import time
 from collections import defaultdict, deque
-from collections.abc import Coroutine
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
+from dataclasses import dataclass, field, replace
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +57,18 @@ DEFAULT_REQUEST_TIMEOUT_SEC = 10.0
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_VISION_BYTES = 64 * 1024 * 1024
 MAX_VISION_CACHE_ITEMS = 8
+
+# Upper control defaults stay separate from the legacy three-channel defaults:
+# enabling the fourth channel must never move text/audio/vision addresses.
+DEFAULT_CONTROL_BIND_HOST = "127.0.0.1"
+DEFAULT_CONTROL_PORT = 8769
+UPPER_SCHEMA_VERSION = "aeb.upper_steps.v1"
+UPPER_LIVE_EVENT_LIMIT = 64
+UPPER_CLOSE_TIMEOUT_SEC = 5.0
+# Duplicated from upper_contracts so settings validation still works when the
+# new modules are absent; the contract module stays an optional dependency.
+_WIRE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+UPPER_MAX_ID_CHARS = 128
 
 
 def _endpoint(host: str, port: int) -> str:
@@ -475,17 +491,461 @@ def json_dumps(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+class UpperUnavailable(RuntimeError):
+    """A new-feature dependency is absent or misconfigured; legacy paths stay up."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
+        super().__init__(f"{code}: {detail}" if detail else code)
+        self.code = code
+        self.detail = detail
+
+
+def _as_bool(value: Any, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off", ""}:
+            return False
+    raise UpperUnavailable("invalid_upper_settings", f"{field_name} is not a boolean")
+
+
+@dataclass(frozen=True)
+class UpperSettings:
+    """Upper-control settings resolved from the injected Host config, then env."""
+
+    enabled: bool = False
+    control_enabled: bool = False
+    control_bind_host: str = DEFAULT_CONTROL_BIND_HOST
+    control_port: int = DEFAULT_CONTROL_PORT
+    control_peer_id: str = ""
+    robot_id: str = ""
+    routing_provider_id: str = ""
+    generation_provider_id: str = ""
+    control_route_ref: str = "upper-control"
+    model_timeout_s: float = 30.0
+
+    @classmethod
+    def from_config(
+        cls,
+        config: Mapping[str, Any] | None,
+        environ: Mapping[str, str] | None = None,
+    ) -> "UpperSettings":
+        """Read plugin config first and fall back to env.
+
+        The Host injects its ``AstrBotConfig``; nothing here reads Host private
+        configuration paths, so an unbound plugin instance still resolves.
+        """
+        env = os.environ if environ is None else environ
+        mapping: Mapping[str, Any] = config if isinstance(config, Mapping) else {}
+
+        def raw(key: str, env_key: str, default: Any) -> Any:
+            value = mapping.get(key)
+            if value is not None and value != "":
+                return value
+            fallback = env.get(env_key)
+            return default if fallback is None or fallback == "" else fallback
+
+        port = raw("control_port", "ASTRBOTEX_UPPER_CONTROL_PORT", DEFAULT_CONTROL_PORT)
+        try:
+            port_number = int(port)
+        except (TypeError, ValueError) as exc:
+            raise UpperUnavailable("invalid_upper_settings", "control_port is not an integer") from exc
+        if not 1 <= port_number <= 65535:
+            raise UpperUnavailable("invalid_upper_settings", "control_port is out of range")
+        timeout = raw("model_timeout_s", "ASTRBOTEX_UPPER_MODEL_TIMEOUT_S", 30.0)
+        try:
+            timeout_sec = float(timeout)
+        except (TypeError, ValueError) as exc:
+            raise UpperUnavailable("invalid_upper_settings", "model_timeout_s is not a number") from exc
+        if not 0 < timeout_sec <= 600:
+            raise UpperUnavailable("invalid_upper_settings", "model_timeout_s is out of range")
+        host = str(raw("control_bind_host", "ASTRBOTEX_UPPER_CONTROL_HOST", DEFAULT_CONTROL_BIND_HOST)).strip()
+        if not host:
+            raise UpperUnavailable("invalid_upper_settings", "control_bind_host is empty")
+        route_ref = str(raw("control_route_ref", "ASTRBOTEX_UPPER_CONTROL_ROUTE_REF", "upper-control")).strip()
+        if not _WIRE_ID_RE.match(route_ref or ""):
+            # EX compares this against its locally registered route set; a malformed
+            # value would be rejected on every injection instead of at startup.
+            raise UpperUnavailable("invalid_upper_settings", "control_route_ref is not a wire id")
+        return cls(
+            enabled=_as_bool(raw("upper_enabled", "ASTRBOTEX_UPPER_ENABLED", False), field_name="upper_enabled"),
+            control_enabled=_as_bool(
+                raw("control_enabled", "ASTRBOTEX_UPPER_CONTROL_ENABLED", False), field_name="control_enabled"
+            ),
+            control_bind_host=host,
+            control_port=port_number,
+            control_peer_id=str(raw("control_peer_id", "ASTRBOTEX_UPPER_CONTROL_PEER_ID", "")).strip(),
+            robot_id=str(raw("robot_id", "ASTRBOTEX_UPPER_ROBOT_ID", "")).strip(),
+            routing_provider_id=str(raw("routing_provider_id", "ASTRBOTEX_UPPER_ROUTING_PROVIDER_ID", "")).strip(),
+            generation_provider_id=str(raw("generation_provider_id", "ASTRBOTEX_UPPER_GENERATION_PROVIDER_ID", "")).strip(),
+            control_route_ref=route_ref,
+            model_timeout_s=timeout_sec,
+        )
+
+
+class _UpperPlanRepository:
+    """B07's ``PlanRepository`` protocol over B04's ``UpperStore``.
+
+    The two were written against different call shapes: B07 passes
+    ``(limit, offset)`` positionally and reads a ``has_more`` flag, while B04 is
+    keyword-only and returns a bare list. The translation belongs at the seam
+    B10 owns, not in either module.
+    """
+
+    __slots__ = ("_store",)
+
+    def __init__(self, store: Any) -> None:
+        self._store = store
+
+    def list_plans(self, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+        # One extra row decides has_more without a second query.
+        probe = limit + 1 if limit < 200 else limit
+        items = self._store.list_plans(limit=probe, offset=offset)
+        return {"plans": [self._project(item) for item in list(items)[:limit]],
+                "has_more": len(items) > limit}
+
+    @staticmethod
+    def _project(raw: Any) -> Any:
+        if not isinstance(raw, Mapping):
+            return raw
+        item = dict(raw)
+        batch = item.get("batch")
+        item.setdefault("prompt_version", item.get("prompt_hash"))
+        item.setdefault("catalog_version", item.get("catalog_hash"))
+        if isinstance(batch, Mapping):
+            phase = batch.get("phase") or batch.get("status") or "delivery_unknown"
+            item.setdefault("delivery_phase", phase)
+            item.setdefault("sent_prefix", len(batch.get("segment_ids") or []))
+            item.setdefault("deliveries", [{
+                "batch_id": batch.get("batch_id"), "phase": phase,
+                "payload_hash": batch.get("payload_hash"),
+                "segment_ids": list(batch.get("segment_ids") or []),
+                "attempted_at": batch.get("created_at"),
+            }])
+        else:
+            # send_count is an intended prefix until a batch is reserved.
+            item.setdefault("delivery_phase", "unsent")
+            item.setdefault("sent_prefix", 0)
+            item.setdefault("deliveries", [])
+        return item
+
+    def get_plan(self, plan_id: str) -> Any:
+        try:
+            raw = self._store.get_plan(plan_id)
+        except TaskError as exc:
+            if exc.code == "unknown_plan":
+                return None
+            raise
+        return self._project(raw)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+
+class _UpperActionRepository:
+    """Translate the real catalog's immutable snapshots to the management API."""
+
+    def __init__(self, catalog: Any) -> None:
+        self._catalog = catalog
+
+    def snapshot(self) -> dict[str, Any]:
+        snapshot = self._catalog.snapshot()
+        return {"records": [entry.record.to_dict() for entry in snapshot.entries],
+                "revision": snapshot.revision, "catalog_version": snapshot.version}
+
+    def save(self, record: Mapping[str, Any], expected_revision: int) -> dict[str, Any]:
+        record = dict(record)
+        if not record.get("action_ref"):
+            record["action_ref"] = "aeb-" + uuid.uuid4().hex
+        snapshot = self._catalog.save(record, expected_revision)
+        saved = snapshot.get(record["action_ref"]).record.to_dict()
+        return {"action_ref": saved["action_ref"], "record": saved,
+                "revision": snapshot.revision, "catalog_version": snapshot.version}
+
+    def delete(self, action_ref: str, expected_revision: int) -> Any:
+        return self._catalog.delete(action_ref, expected_revision)
+
+
+class _UpperApiOwner:
+    def api_dependencies(self, plugin: "AstrBotEXInteractionPlugin") -> Any:
+        """Build B07's dependency object from what B10 assembled.
+
+        Imported lazily: the management API is an optional surface, and a Host
+        without it must still load the plugin.
+        """
+        from .upper_api import UpperApiDependencies as ApiDependencies
+
+        return ApiDependencies(
+            settings=self.settings_repository,
+            actions=_UpperActionRepository(self.catalog),
+            plans=_UpperPlanRepository(self.store) if self.store is not None else None,
+            ex_availability=plugin.upper_ex_availability,
+            runtime_status=plugin.upper_runtime_status,
+            prompt_defaults=plugin.upper_prompt_defaults,
+            # None lets B07 use the Host's own provider listing, which already
+            # knows every configured provider; duplicating it here would drift.
+            providers=None,
+            notes={
+                "data_root": str(self.data_root),
+                "control_route_ref": self.settings.control_route_ref,
+                "robot_id": self.settings.robot_id,
+            },
+        )
+
+
+
+@dataclass
+class UpperManagement(_UpperApiOwner):
+    """Local management has no dependency on model calls or a connected robot."""
+
+    settings: UpperSettings
+    data_root: Path
+    settings_repository: Any
+    catalog: Any
+    prompts: Any
+    store: Any
+    api_registrar: Callable[..., Any] | None = None
+    api_registered: bool = False
+
+
+@dataclass
+class UpperComponents(_UpperApiOwner):
+    """Everything B10 builds for the new feature; owned and closed by the plugin."""
+
+    settings: UpperSettings
+    data_root: Path
+    settings_repository: Any
+    catalog: Any
+    prompts: Any
+    store: Any
+    models: Any
+    control: Any
+    router: Any
+    pipeline: Any
+    trusted_input: Any
+    api_registrar: Callable[..., Any] | None = None
+    api_registered: bool = False
+    control_started: bool = False
+
+
+
+class UpperModuleFactory:
+    """Resolve B01-B09 symbols and build them in dependency order.
+
+    ``main.py`` never imports the new modules at module scope: an absent module
+    must degrade to "new feature unavailable" instead of breaking plugin import.
+    Constructor signatures below are the contract B10 publishes to the other
+    tasks; every argument is keyword-only so a stub can be substituted.
+    """
+
+    SYMBOLS: dict[str, tuple[str, str]] = {
+        "settings_repository": ("upper_settings", "SettingsRepository"),
+        "catalog": ("action_catalog", "ActionCatalog"),
+        "prompts": ("upper_prompts", "PromptAssembler"),
+        "store": ("upper_store", "UpperStore"),
+        "models": ("upper_models", "UpperModels"),
+        "control": ("control_channel", "ControlChannel"),
+        "pipeline": ("upper_pipeline", "UpperPipeline"),
+        "router": ("output_router", "UpperOutputRouter"),
+        "contracts": ("upper_contracts", "TrustedUpperInput"),
+        "api": ("upper_api", "register_upper_api"),
+    }
+
+    def __init__(self, package: str) -> None:
+        self.package = package
+
+    def resolve(self, key: str) -> Any:
+        module_name, symbol = self.SYMBOLS[key]
+        try:
+            module = import_module(f".{module_name}", self.package)
+        except Exception as exc:  # noqa: BLE001 - absent or broken module is a dependency gap
+            raise UpperUnavailable("module_missing", f"{module_name}: {exc}") from exc
+        target = getattr(module, symbol, None)
+        if target is None:
+            raise UpperUnavailable("symbol_missing", f"{module_name}.{symbol}")
+        return target
+
+    def load_management(self, plugin: "AstrBotEXInteractionPlugin", settings: UpperSettings) -> UpperManagement:
+        if plugin.plugin_config is None:
+            raise UpperUnavailable("host_config_unavailable")
+        data_root = plugin.upper_data_root()
+        return UpperManagement(
+            settings=settings,
+            data_root=data_root,
+            settings_repository=self.resolve("settings_repository")(config=plugin.plugin_config),
+            catalog=self.resolve("catalog")(data_root=data_root),
+            prompts=self.resolve("prompts")(),
+            store=self.resolve("store")(plugin.task_store) if plugin.task_store is not None else None,
+            api_registrar=self.resolve("api"),
+        )
+
+    async def load(self, plugin: "AstrBotEXInteractionPlugin", settings: UpperSettings) -> UpperComponents:
+        if plugin.plugin_config is None:
+            raise UpperUnavailable("host_config_unavailable")
+        if plugin.task_store is None:
+            raise UpperUnavailable("store_unavailable")
+        if not settings.robot_id:
+            raise UpperUnavailable("robot_id_unconfigured")
+        if not settings.control_peer_id:
+            raise UpperUnavailable("control_peer_unconfigured")
+        host = plugin.upper_host_adapter()
+        for attribute in ("llm_generate", "get_provider_by_id", "get_current_chat_provider_id"):
+            if not callable(getattr(host, attribute, None)):
+                raise UpperUnavailable("host_adapter_incomplete", attribute)
+
+        data_root = plugin.upper_data_root()
+        created: list[Any] = []
+        try:
+            settings_repository = self.resolve("settings_repository")(config=plugin.plugin_config)
+            created.append(settings_repository)
+            catalog = self.resolve("catalog")(data_root=data_root)
+            created.append(catalog)
+            prompts = self.resolve("prompts")()
+            created.append(prompts)
+            # UpperStore layers on the one TaskStore connection; it is never
+            # closed here because the legacy teardown owns that connection.
+            store = self.resolve("store")(plugin.task_store)
+            models = self.resolve("models")(host, timeout_s=settings.model_timeout_s)
+            created.append(models)
+            control = self.resolve("control")(
+                peer_id=settings.control_peer_id,
+                robot_id=settings.robot_id,
+                bind_host=settings.control_bind_host,
+                port=settings.control_port,
+                request_timeout_sec=settings.model_timeout_s,
+                on_status=plugin.upper_control_status,
+            )
+            created.append(control)
+            router = self.resolve("router")(store)
+            trusted_input = self.resolve("contracts")
+            pipeline = self.resolve("pipeline")(
+                store=store,
+                models=models,
+                prompts=prompts,
+                settings=settings_repository,
+                catalog=catalog,
+                control=control,
+                router=router,
+                robot_id=settings.robot_id,
+                peer_id=settings.control_peer_id,
+                routing_provider_id=settings.routing_provider_id,
+                generation_provider_id=settings.generation_provider_id,
+                route_ref=settings.control_route_ref,
+                active_control=plugin.upper_control_occupied,
+                alive=plugin.upper_alive,
+                on_event=plugin.upper_event,
+            )
+            created.append(pipeline)
+        except UpperUnavailable:
+            await self._teardown(created)
+            raise
+        except Exception as exc:  # noqa: BLE001 - a bad constructor is a dependency gap
+            await self._teardown(created)
+            raise UpperUnavailable("upper_composition_failed", str(exc)) from exc
+        try:
+            api_registrar = self.resolve("api")
+        except UpperUnavailable:
+            api_registrar = None  # Page/API absent is a partial feature, not a crash.
+        return UpperComponents(
+            settings=settings,
+            data_root=data_root,
+            settings_repository=settings_repository,
+            catalog=catalog,
+            prompts=prompts,
+            store=store,
+            models=models,
+            control=control,
+            router=router,
+            pipeline=pipeline,
+            trusted_input=trusted_input,
+            api_registrar=api_registrar,
+        )
+
+    @staticmethod
+    async def _teardown(created: list[Any]) -> None:
+        """A partial assembly must not leak an open socket or file handle.
+
+        ``ControlChannel.close`` is a coroutine: closing it without awaiting
+        would leave the ROUTER bound and make the next reload fail on the port.
+        """
+        for component in reversed(created):
+            closer = getattr(component, "close", None)
+            if not callable(closer):
+                continue
+            try:
+                outcome = closer()
+                if inspect.isawaitable(outcome):
+                    await asyncio.wait_for(outcome, timeout=UPPER_CLOSE_TIMEOUT_SEC)
+            except Exception:  # noqa: BLE001 - best-effort teardown
+                logger.debug("AstrBotEX upper partial teardown failed.", exc_info=True)
+
+
+class _UpperHostAdapter:
+    """The only Host surface the upper models are allowed to touch.
+
+    B03 requires ``llm_generate``, ``get_provider_by_id`` and
+    ``get_current_chat_provider_id``. The Host exposes the third one as a
+    coroutine, but B03 resolves providers synchronously, so this adapter offers
+    the synchronous form backed by ``get_using_provider`` -- same object, same
+    provider id, no coroutine that would silently never run.
+    """
+
+    __slots__ = ("_context",)
+
+    def __init__(self, context: Any) -> None:
+        self._context = context
+
+    async def llm_generate(self, **kwargs: Any) -> Any:
+        generate = getattr(self._context, "llm_generate", None)
+        if not callable(generate):
+            raise UpperUnavailable("host_adapter_incomplete", "llm_generate")
+        return await generate(**kwargs)
+
+    def get_provider_by_id(self, provider_id: str) -> Any:
+        resolve = getattr(self._context, "get_provider_by_id", None)
+        if not callable(resolve):
+            return None
+        return resolve(provider_id)
+
+    def get_current_chat_provider_id(self, origin: str | None = None) -> str:
+        resolve = getattr(self._context, "get_using_provider", None)
+        provider = resolve(origin) if callable(resolve) else None
+        if provider is None:
+            raise UpperUnavailable("provider_unavailable", "no current chat provider")
+        meta = getattr(provider, "meta", None)
+        provider_id = getattr(meta() if callable(meta) else None, "id", "")
+        if not provider_id:
+            raise UpperUnavailable("provider_unavailable", "provider has no id")
+        return str(provider_id)
+
+
+def _activated_command(event: AstrMessageEvent) -> bool:
+    """True when a registered command matched, so management commands stay first."""
+    from astrbot.core.star.filter.command import CommandFilter
+
+    for handler in event.get_extra("activated_handlers") or []:
+        if any(isinstance(item, CommandFilter) for item in handler.event_filters):
+            return True
+    return False
+
+
 @star.register(
     "astrbot_plugin_astrbotex_interaction",
     "AstrBotEX Team",
-    "Bridge AstrBot and AstrBotEX through independent ZeroMQ text, audio, and vision channels.",
-    "0.5.0",
+    "Bridge AstrBot and AstrBotEX through independent ZeroMQ text, audio, and vision channels, plus an optional control channel for upper-control step injection.",
+    "0.6.0",
 )
 class AstrBotEXInteractionPlugin(star.Star):
     """Merged AstrBotEX platform, bridge, provider proxy, and ZMQ transport."""
 
-    def __init__(self, context: star.Context) -> None:
+    def __init__(self, context: star.Context, config: Any | None = None) -> None:
         super().__init__(context)
+        self.plugin_config = config
         self.zmq_bind_host = os.environ.get(
             "ASTRBOTEX_ZMQ_BIND_HOST", DEFAULT_ZMQ_BIND_HOST
         )
@@ -531,6 +991,33 @@ class AstrBotEXInteractionPlugin(star.Star):
         self._vision_jpeg_cache: deque[dict[str, Any]] = deque(
             maxlen=max(self.vision_cache_items, 1)
         )
+        self.upper_generation = 0
+        self._upper: UpperComponents | None = None
+        self._upper_management: UpperManagement | None = None
+        self._upper_refresh_lock = asyncio.Lock()
+        self._upper_active = False
+        self._closing = False
+        self._upper_unavailable: str | None = "upper_disabled"
+        self._upper_config_error: str | None = None
+        self._upper_api_error: str | None = None
+        self._upper_live_events: dict[str, AstrMessageEvent] = {}
+        self._upper_capabilities: dict[str, Any] = {}
+        self._upper_capabilities_at: str | None = None
+        self._upper_last_delivery: dict[str, Any] | None = None
+        self._upper_data_root_override: Path | None = None
+        self.upper_factory = UpperModuleFactory(
+            __package__ or "astrbot_plugin_astrbotex_interaction"
+        )
+        try:
+            self.upper_settings = UpperSettings.from_config(config)
+        except UpperUnavailable as exc:
+            # A bad new-feature setting must not take the legacy channels down.
+            self.upper_settings = UpperSettings()
+            self._upper_config_error = exc.code
+            logger.warning(
+                "AstrBotEX upper control settings rejected (%s); upper control stays disabled.",
+                exc,
+            )
         self.context.add_llm_tools(
             SubmitAstrBotEXProposalTool(plugin=self),
             GetVisionJsonBufferTool(plugin=self),
@@ -538,6 +1025,15 @@ class AstrBotEXInteractionPlugin(star.Star):
         )
 
     async def initialize(self) -> None:
+        # Order is fixed by B10: legacy channels and the one store first, then the
+        # upper components layered on top of it, then the API, then the optional
+        # control channel, then input takeover. Import/construct never binds a
+        # port or opens a database.
+        if any(ch is not None for ch in (self.text_channel, self.audio_channel, self.vision_channel)):
+            # Repeated initialize without terminate must not leak a second listener.
+            await self.terminate()
+        self._closing = False
+        self.upper_generation += 1
         self.text_channel = ZmqRouterChannel(
             "text",
             _endpoint(self.zmq_bind_host, self.text_port),
@@ -608,6 +1104,12 @@ class AstrBotEXInteractionPlugin(star.Star):
                 self.task_coordinator = None
                 logger.warning("AstrBotEX private planning dependencies unavailable; ordinary chat remains enabled.")
         await self._attach_platform(log_missing=True)
+        # Upper components layer on the store created above: UpperStore wraps the
+        # one TaskStore connection, so this cannot run before it exists.
+        await self._prepare_upper_dependencies()
+        self._register_upper_api()
+        await self._start_upper_control()
+        self._activate_upper_input()
         logger.info(
             "AstrBotEX ZeroMQ channels started: text=%s, audio=%s, vision=%s",
             self.text_port,
@@ -637,6 +1139,418 @@ class AstrBotEXInteractionPlugin(star.Star):
                 self.session_id,
                 self.request_timeout_sec,
             )
+
+    # -- upper control lifecycle (B10) ---------------------------------------
+
+    async def _refresh_upper_enabled(self) -> None:
+        if self._closing or self.plugin_config is None:
+            return
+        enabled = self.plugin_config.get("upper_enabled", self.upper_settings.enabled)
+        if not isinstance(enabled, bool) or enabled == self.upper_settings.enabled:
+            return
+        async with self._upper_refresh_lock:
+            enabled = self.plugin_config.get("upper_enabled", self.upper_settings.enabled)
+            if not isinstance(enabled, bool) or enabled == self.upper_settings.enabled:
+                return
+            self.upper_settings = replace(self.upper_settings, enabled=enabled)
+            self.upper_generation += 1
+            if self._upper is not None:
+                invalidator = getattr(self._upper.models, "invalidate", None)
+                if callable(invalidator):
+                    invalidator()
+            if not enabled:
+                self._upper_active = False
+                self._upper_unavailable = "upper_disabled"
+                return
+            if self._upper is None:
+                await self._prepare_upper_dependencies()
+                self._register_upper_api()
+                await self._start_upper_control()
+            self._activate_upper_input()
+
+    @property
+    def upper_ready(self) -> bool:
+        return self._upper_active and self._upper is not None and self.upper_settings.enabled
+
+    @property
+    def upper_status(self) -> dict[str, Any]:
+        """Read-only projection; never an execution grant."""
+        return {
+            "enabled": self.upper_settings.enabled,
+            "available": self._upper is not None,
+            "active": self._upper_active,
+            "reason": self._upper_unavailable,
+            "control_enabled": self.upper_settings.control_enabled,
+            "control_started": bool(self._upper and self._upper.control_started),
+            "api_registered": bool((self._upper or self._upper_management)
+                                   and (self._upper or self._upper_management).api_registered),
+            "generation": self.upper_generation,
+            "bind": (
+                _endpoint(self.upper_settings.control_bind_host, self.upper_settings.control_port)
+                if self.upper_settings.control_enabled
+                else None
+            ),
+        }
+
+    def upper_data_root(self) -> Path:
+        if self._upper_data_root_override is not None:
+            return self._upper_data_root_override
+        override = os.environ.get("ASTRBOTEX_UPPER_DATA_ROOT", "").strip()
+        if override:
+            return Path(override)
+        return Path(star.StarTools.get_data_dir("astrbot_plugin_astrbotex_interaction"))
+
+    def upper_db_path(self) -> Path:
+        return self.upper_data_root() / "tasks.sqlite3"
+
+    async def _prepare_upper_dependencies(self) -> None:
+        if self._upper is not None:
+            await self._close_upper()
+        self._upper = None
+        self._upper_active = False
+        self._upper_api_error = None
+        if self._upper_config_error:
+            self._upper_unavailable = self._upper_config_error
+            return
+        if not self.upper_settings.enabled:
+            self._upper_unavailable = "upper_disabled"
+            return
+        if not self.upper_settings.control_enabled:
+            # Every upper turn ends at the control channel. Enabling the feature
+            # without it would classify an input and then have nowhere to deliver.
+            self._upper_unavailable = "control_disabled"
+            return
+        if self.task_store is None:
+            self._upper_unavailable = "store_unavailable"
+            return
+        try:
+            outcome = self.upper_factory.load(self, self.upper_settings)
+            if inspect.isawaitable(outcome):
+                outcome = await outcome
+            self._upper = outcome
+        except UpperUnavailable as exc:
+            self._upper_unavailable = exc.code
+            logger.warning(
+                "AstrBotEX upper control unavailable (%s); legacy channels stay enabled.",
+                exc,
+            )
+        except Exception:  # noqa: BLE001 - composition failure is a feature gap
+            self._upper_unavailable = "upper_composition_failed"
+            logger.warning(
+                "AstrBotEX upper control composition failed; legacy channels stay enabled.",
+                exc_info=True,
+            )
+
+    def _register_upper_api(self) -> None:
+        if not callable(getattr(self.context, "register_web_api", None)):
+            self._upper_api_error = "host_page_api_unavailable"
+            return
+        try:
+            components = self._upper
+            if components is None:
+                factory = self.upper_factory
+                if not callable(getattr(factory, "load_management", None)):
+                    factory = UpperModuleFactory(__package__ or "astrbot_plugin_astrbotex_interaction")
+                self._upper_management = factory.load_management(self, self.upper_settings)
+                components = self._upper_management
+            if components.api_registrar is None:
+                self._upper_api_error = "host_page_api_unavailable"
+                return
+            components.api_registrar(self.context, components.api_dependencies(self))
+            components.api_registered = True
+            self._upper_api_error = None
+        except Exception:  # management failure must not break the legacy channels
+            self._upper_api_error = "upper_api_registration_failed"
+            logger.warning("AstrBotEX upper management API registration failed.", exc_info=True)
+
+    async def _start_upper_control(self) -> None:
+        if self._upper is None or not self.upper_settings.control_enabled:
+            return
+        try:
+            await self._upper.control.start()
+            self._upper.control_started = True
+        except Exception as exc:  # noqa: BLE001 - only the new channel is lost
+            self._upper.control_started = False
+            logger.warning(
+                "AstrBotEX upper control channel did not start (%s); execution injection stays off.",
+                exc,
+            )
+            return
+        # One read so the management page shows the real session and readiness.
+        await self._refresh_upper_capabilities()
+
+    def _activate_upper_input(self) -> None:
+        self._upper_active = False
+        if self._upper is None:
+            return
+        if not self._upper.control_started:
+            # Taking over input while injection is impossible would swallow messages.
+            self._upper_unavailable = "control_unavailable"
+            logger.warning(
+                "AstrBotEX upper control was requested but is unavailable; input takeover stays off."
+            )
+            return
+        self._upper_active = True
+        self._upper_unavailable = None
+        logger.info(
+            "AstrBotEX upper control active: control=%s api=%s",
+            "on" if self._upper.control_started else "off",
+            "on" if self._upper.api_registered else "off",
+        )
+
+    async def _close_upper(self) -> None:
+        components, self._upper = self._upper, None
+        self._upper_management = None
+        self._upper_active = False
+        self._upper_capabilities = {}
+        self._upper_capabilities_at = None
+        if components is None:
+            return
+        self._upper_live_events.clear()
+        errors: list[str] = []
+        control = getattr(components, "control", None)
+        if components.control_started and control is not None:
+            try:
+                await asyncio.wait_for(control.close(), timeout=UPPER_CLOSE_TIMEOUT_SEC)
+            except (TimeoutError, asyncio.TimeoutError):
+                errors.append("control_close_timeout")
+                logger.warning("AstrBotEX upper control close timed out; socket may still be bound.")
+            except Exception:  # noqa: BLE001
+                errors.append("control_close_failed")
+                logger.warning("AstrBotEX upper control close failed.", exc_info=True)
+        components.control_started = False
+        pipeline = getattr(components, "pipeline", None)
+        closer = getattr(pipeline, "close", None)
+        if callable(closer):
+            try:
+                outcome = closer()
+                if asyncio.iscoroutine(outcome):
+                    await asyncio.wait_for(outcome, timeout=UPPER_CLOSE_TIMEOUT_SEC)
+            except (TimeoutError, asyncio.TimeoutError):
+                errors.append("pipeline_close_timeout")
+            except Exception:  # noqa: BLE001
+                errors.append("pipeline_close_failed")
+                logger.warning("AstrBotEX upper pipeline close failed.", exc_info=True)
+        store = getattr(components, "store", None)
+        # The legacy store is closed by the original teardown; never close twice.
+        # UpperStore layers on that connection and owns no handle of its own.
+        store_closer = getattr(store, "close", None)
+        if store is not None and store is not self.task_store and callable(store_closer):
+            try:
+                store_closer()
+            except Exception:  # noqa: BLE001
+                errors.append("store_close_failed")
+                logger.warning("AstrBotEX upper store close failed.", exc_info=True)
+        if errors:
+            self._upper_unavailable = errors[0]
+
+    def _upper_input_draft(self, event: AstrMessageEvent, text: str) -> dict[str, Any]:
+        """Build the keyword arguments of ``TrustedUpperInput.issue``.
+
+        Identity is read from the Host event and deployment config only: no
+        message field, model output or Page body can name the robot, the user
+        or the route. ``ex_session`` is filled only when the event really came
+        from the AstrBotEX adapter, because a Host platform session id is not an
+        EX session and EX refuses the batch on a mismatch.
+        """
+        source = "platform"
+        peer: bytes | None = None
+        # The contract requires a wire id here, and EX compares it against the
+        # session it advertises. A real EX event names its own; anything else
+        # uses the one session this plugin talks to EX on.
+        ex_session = self.session_id
+        if isinstance(event, AstrBotEXMessageEvent):
+            if event._adapter is not self._adapter:
+                raise UpperUnavailable("untrusted_ex_event")
+            source = "ex_voice"
+            peer = event._peer
+            ex_session = str(event.get_session_id() or self.session_id)
+        if not _WIRE_ID_RE.match(ex_session or ""):
+            raise UpperUnavailable("invalid_input_identity", "ex_session")
+        robot_id = self.upper_settings.robot_id
+        if not robot_id:
+            raise UpperUnavailable("robot_id_unconfigured")
+        origin = str(event.unified_msg_origin or "")
+        sender = str(event.get_sender_id() or "")
+        host_session = origin
+        for name, value in (("origin", origin), ("sender", sender)):
+            if not value.strip():
+                raise UpperUnavailable("invalid_input_identity", name)
+            if not _WIRE_ID_RE.match(value) or len(value) > UPPER_MAX_ID_CHARS:
+                raise UpperUnavailable("invalid_input_identity", name)
+        route_ref = self.upper_settings.control_route_ref or "upper-control"
+        message_id = str(getattr(event.message_obj, "message_id", "") or "")
+        if message_id:
+            input_key = "upper-" + hashlib.sha256(
+                json.dumps([origin, sender, message_id], ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
+        else:
+            # No Host message id means no idempotency key exists; never invent a
+            # collision by hashing the text alone.
+            input_key = "upper-" + uuid.uuid4().hex
+        return {
+            "robot_id": robot_id,
+            "session_id": host_session,
+            "user_id": sender,
+            "route_ref": route_ref,
+            "ex_session": ex_session,
+            "input_text": text,
+            "input_key": input_key,
+            "origin": origin,
+            # Not part of TrustedUpperInput; the handler needs them to route the
+            # one public exit and to key the live-event registry.
+            "_source": source,
+            "_reply_peer": peer,
+        }
+
+    def _upper_old_task_busy(self, event: AstrMessageEvent) -> bool:
+        """An active legacy control task keeps the session; upper never preempts it."""
+        if self.task_store is None:
+            return False
+        origin, sender = event.unified_msg_origin, event.get_sender_id()
+        for task in self.task_store.active_tasks():
+            if task.get("session_id") == origin and str(task.get("user_id")) == str(sender):
+                return True
+        return False
+
+    def upper_control_occupied(self) -> bool:
+        """B05's ``active_control``: the robot is owned by a legacy Goal."""
+        if self.task_store is None:
+            return False
+        return bool(self.task_store.active_tasks())
+
+    def upper_alive(self) -> bool:
+        """B05 calls this three times per turn; a reloaded epoch is not alive."""
+        return (self._upper_active and self._upper is not None and not self._closing
+                and bool(self.plugin_config is None
+                         or self.plugin_config.get("upper_enabled", self.upper_settings.enabled)))
+
+    def upper_event(self, record: dict[str, Any]) -> None:
+        """Telemetry sink for B05; never a public surface."""
+        if record.get("event") in {"rejected", "control_error", "delivery_not_recorded"}:
+            logger.warning("AstrBotEX upper pipeline: %s", json_dumps(record))
+
+    def upper_control_status(self, record: dict[str, Any]) -> None:
+        if record.get("event") in {"error", "unavailable", "closed"}:
+            logger.info("AstrBotEX upper control channel: %s", json_dumps(record))
+
+    def upper_host_adapter(self) -> Any:
+        """Thin adapter over the Host public surface; B03 refuses a raw Context."""
+        return _UpperHostAdapter(self.context)
+
+    # -- read-only projections for the management page (B07) ----------------
+
+    def upper_ex_availability(self) -> dict[str, Any]:
+        """What the page may show about EX. Never an execution claim.
+
+        Action ids come from the last capability read the control channel did,
+        because the page handler is synchronous and a fresh read would be a
+        network call inside a web request.
+        """
+        control = getattr(self._upper, "control", None)
+        if control is None:
+            return {"state": "unknown", "catalog_version": None,
+                    "action_ids": [], "checked_at": None}
+        try:
+            online = bool(control.online_peers())
+        except Exception:  # noqa: BLE001 - a status probe must never raise
+            online = False
+        summary = self._upper_capabilities or {}
+        return {
+            "state": "online" if online else "offline",
+            "catalog_version": summary.get("catalog_version"),
+            "action_ids": list(summary.get("action_ids") or []),
+            "checked_at": self._upper_capabilities_at,
+        }
+
+    def upper_runtime_status(self) -> dict[str, Any]:
+        control = getattr(self._upper, "control", None)
+        running = False
+        if control is not None:
+            try:
+                running = bool(control.is_running)
+            except Exception:  # noqa: BLE001
+                running = False
+        return {
+            "control_state": "running" if running else "stopped",
+            "control_enabled": self.upper_settings.control_enabled,
+            "control_peer": self.upper_settings.control_peer_id or None,
+            "ex_session": self._upper_capabilities.get("ex_session")
+            if self._upper_capabilities else self.session_id,
+            "input_ready": bool(self._upper_capabilities.get("input_ready")),
+            "last_delivery": self._upper_last_delivery,
+        }
+
+    def upper_prompt_defaults(self) -> dict[str, str]:
+        prompts = getattr(self._upper or self._upper_management, "prompts", None)
+        if prompts is None:
+            return {}
+        try:
+            sources = prompts.builtin_sources()
+        except Exception:  # noqa: BLE001 - a missing built-in is a page gap, not a crash
+            logger.warning("AstrBotEX upper built-in prompt text unavailable.", exc_info=True)
+            return {}
+        return {
+            "routing": sources.get("intent_routing", {}).get("text", ""),
+            "planning": sources.get("body_planning", {}).get("text", ""),
+        }
+
+    async def _refresh_upper_capabilities(self) -> None:
+        """One read after the control channel starts, so the page has real data."""
+        control = getattr(self._upper, "control", None)
+        if control is None:
+            return
+        try:
+            summary = await control.capabilities()
+        except Exception as exc:  # noqa: BLE001 - EX may simply be offline
+            logger.info("AstrBotEX upper capabilities unavailable at start (%s).", exc)
+            return
+        self._upper_capabilities = dict(summary)
+        self._upper_capabilities_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+    def upper_public_sender_for(
+        self, event: AstrMessageEvent, source: str
+    ) -> Callable[[str], Awaitable[bool]]:
+        """Bind the one public exit of this turn to the event that admitted it."""
+
+        async def send_public(text: str) -> bool:
+            body = str(text or "").strip()
+            if not body:
+                return False
+            if not self._upper_active or self._upper is None:
+                return False  # Reloaded or torn down: a stale plan never speaks.
+            if source == "ex_voice":
+                return await self._upper_send_ex_reply(body, event)
+            try:
+                await event.send(MessageChain().message(body))
+            except Exception:  # noqa: BLE001
+                logger.warning("AstrBotEX upper public reply failed.", exc_info=True)
+                return False
+            return True
+
+        return send_public
+
+    async def _upper_send_ex_reply(self, text: str, event: AstrMessageEvent) -> bool:
+        """EX voice sources reply on the original text peer; the TTS chain follows."""
+        peer = getattr(event, "_peer", None)
+        if self.text_channel is None or not peer:
+            return False
+        payload = {
+            "text": text,
+            "session_id": str(event.get_session_id() or self.session_id),
+            "type": "llm_reply",
+        }
+        try:
+            await self.text_channel.request(
+                "interaction.reply",
+                payload,
+                peer=peer,
+                timeout_sec=self.request_timeout_sec,
+            )
+        except ZmqTransportError as exc:
+            logger.warning(f"AstrBotEX upper public reply failed: {exc}")
+            return False
+        return True
 
     async def request_text(
         self,
@@ -907,9 +1821,99 @@ class AstrBotEXInteractionPlugin(star.Star):
         event.clear_result()
         return True
 
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=200)
+    async def take_over_upper_input(self, event: AstrMessageEvent) -> None:
+        """Admit one trusted text input to the upper pipeline, then own the event.
+
+        Runs ahead of the legacy task hooks (priority 200 > 100) so a single input
+        is classified once and never reaches the default LLM run or the legacy
+        ``manage_astrbotex_task`` / ``submit_astrbotex_proposal`` tools.
+
+        The turn is awaited, not scheduled: B05's ``process`` is the whole turn,
+        and letting the default Host run continue in parallel is exactly the
+        double-reply this hook exists to prevent.
+        """
+        await self._refresh_upper_enabled()
+        if not self.upper_ready or self._upper is None:
+            return
+        if event.get_extra("upper_handled", False):
+            return
+        if _activated_command(event):
+            return  # Management and explicit cancel commands keep their priority.
+        if event.get_result() is not None:
+            return
+        text = str(event.get_message_str() or "").strip()
+        if not text:
+            return  # Non-text input and the original STT path keep existing handling.
+        try:
+            draft = self._upper_input_draft(event, text)
+        except UpperUnavailable as exc:
+            logger.warning(
+                "AstrBotEX upper input rejected (%s); legacy handling continues.", exc
+            )
+            return
+        if self._upper_old_task_busy(event):
+            # Refuse the conflicting action, but leave the legacy lease/watchdog alone.
+            logger.warning(
+                "AstrBotEX upper input rejected (input_busy): a legacy control task owns this session."
+            )
+            return
+        source = draft.pop("_source", "platform")
+        draft.pop("_reply_peer", None)
+        try:
+            trusted = self._upper.trusted_input.issue(**draft)
+        except Exception as exc:  # noqa: BLE001 - contract rejection is not a crash
+            # Never fall back to legacy handling here: the input was already
+            # admitted as upper traffic, so a second interpretation would reply twice.
+            event.set_extra("upper_handled", True)
+            event.set_extra("upper_error", "invalid_trusted_input")
+            logger.warning("AstrBotEX upper input contract rejected it: %s", exc)
+            event.should_call_llm(False)
+            event.stop_event()
+            return
+        input_key = draft["input_key"]
+        self._upper_live_events[input_key] = event
+        if len(self._upper_live_events) > UPPER_LIVE_EVENT_LIMIT:
+            self._upper_live_events.pop(next(iter(self._upper_live_events)), None)
+        event.set_extra("upper_handled", True)
+        event.set_extra("upper_input_key", input_key)
+        result: Any = None
+        try:
+            result = await self._upper.pipeline.process(
+                trusted,
+                public_sender=self.upper_public_sender_for(event, source),
+                peer=None,  # Public text replies retain their own text peer in the sender.
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed, never double-reply
+            code = getattr(exc, "code", "upper_process_failed")
+            event.set_extra("upper_error", code)
+            logger.warning(
+                "AstrBotEX upper pipeline failed (%s); the default LLM reply stays suppressed.",
+                code,
+            )
+        finally:
+            self._upper_live_events.pop(input_key, None)
+        result_field = result.get if isinstance(result, Mapping) else lambda key, default=None: getattr(result, key, default)
+        error_code = result_field("error_code", None)
+        if error_code:
+            event.set_extra("upper_error", error_code)
+        if result is not None:
+            self._upper_last_delivery = {
+                "plan_id": result_field("plan_id", "") or None,
+                "route": result_field("route", None),
+                "control_status": result_field("control_status", None),
+                "public_sent": bool(result_field("public_sent", False)),
+                "error_code": error_code,
+                "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            }
+        event.should_call_llm(False)
+        event.stop_event()
+
     @filter.custom_filter(WokenHostTaskFilter)
     @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
     async def prepare_host_task_output(self, event: AstrMessageEvent) -> None:
+        if event.get_extra("upper_handled", False):
+            return  # The upper chain owns this input end to end.
         if self._suppress_host_reply_replay(event):
             return
         if event.get_extra("private_planning", False) or not self.task_planning_enabled:
@@ -963,6 +1967,13 @@ class AstrBotEXInteractionPlugin(star.Star):
         req: ProviderRequest,
     ) -> None:
         if event is None or getattr(req, "private_planning", False) or event.get_extra("private_planning", False):
+            return
+        if event.get_extra("upper_handled", False):
+            # Defence in depth: the upper chain must not also install legacy task tools.
+            original = req.func_tool
+            req.func_tool = ToolSet(list(original.tools) if original else [])
+            req.func_tool.remove_tool("submit_astrbotex_proposal")
+            req.func_tool.remove_tool("manage_astrbotex_task")
             return
         if self._suppress_host_reply_replay(event):
             return  # Also fences repeats if the early public message handler was bypassed.
@@ -1521,24 +2532,31 @@ class AstrBotEXInteractionPlugin(star.Star):
         }
 
     def _transport_status(self) -> dict[str, Any]:
+        channels: dict[str, Any] = {
+            "text": {
+                "port": self.text_port,
+                "peers": self.text_channel.peer_count if self.text_channel else 0,
+            },
+            "audio": {
+                "port": self.audio_port,
+                "peers": self.audio_channel.peer_count if self.audio_channel else 0,
+            },
+            "vision": {
+                "port": self.vision_port,
+                "peers": self.vision_channel.peer_count
+                if self.vision_channel
+                else 0,
+            },
+        }
+        if self._upper is not None and self._upper.control_started:
+            channels["control"] = {
+                "port": self.upper_settings.control_port,
+                "peers": getattr(self._upper.control, "peer_count", 0),
+            }
         return {
             "ok": True,
-            "channels": {
-                "text": {
-                    "port": self.text_port,
-                    "peers": self.text_channel.peer_count if self.text_channel else 0,
-                },
-                "audio": {
-                    "port": self.audio_port,
-                    "peers": self.audio_channel.peer_count if self.audio_channel else 0,
-                },
-                "vision": {
-                    "port": self.vision_port,
-                    "peers": self.vision_channel.peer_count
-                    if self.vision_channel
-                    else 0,
-                },
-            },
+            "channels": channels,
+            "upper": self.upper_status,
             "vision_streams": max(
                 len(self._vision_json_cache), len(self._vision_jpeg_cache)
             ),
@@ -1589,6 +2607,13 @@ class AstrBotEXInteractionPlugin(star.Star):
         )
 
     async def terminate(self) -> None:
+        # 1. Stop new input first: a stale generation can never send afterwards.
+        self._closing = True
+        self.upper_generation += 1
+        self._upper_live_events.clear()
+        # 2. Close the new control channel and its workers.
+        await self._close_upper()
+        # 3. Original teardown order, unchanged.
         if self.task_coordinator is not None:
             await self.task_coordinator.close()
             self.task_coordinator = None
@@ -1598,7 +2623,10 @@ class AstrBotEXInteractionPlugin(star.Star):
         self._task_routes.clear()
         for channel in (self.vision_channel, self.audio_channel, self.text_channel):
             if channel is not None:
-                await channel.close()
+                try:
+                    await channel.close()
+                except Exception:  # noqa: BLE001 - one failed close must not strand the rest
+                    logger.warning("AstrBotEX channel close failed.", exc_info=True)
         self.vision_channel = None
         self.audio_channel = None
         self.text_channel = None

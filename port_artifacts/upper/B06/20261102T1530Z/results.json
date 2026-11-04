@@ -1,0 +1,46 @@
+{
+  "task_id": "B06",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "run_id": "20261102T1530Z",
+  "suites": [
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_control_channel.py -v",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "status": "PASS",
+      "layer": "real_zmq_loopback"
+    },
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_zmq_transport.py -v",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "status": "PASS",
+      "layer": "real_zmq_loopback",
+      "note": "shared transport regression"
+    },
+    {
+      "command": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_plugin_channels.py -v",
+      "tests": 1,
+      "failures": 0,
+      "errors": 1,
+      "exit_code": 1,
+      "status": "NOT_RUN",
+      "reason": "ModuleNotFoundError: astrbot; identical failure on the untouched baseline worktree",
+      "layer": "real_host"
+    }
+  ],
+  "acceptance_checks": {
+    "single_and_multi_segment_verbatim_ordered": "PASS - received payload equals the frozen payload; ordinals [0,1] then [2]",
+    "same_batch_sent_once": "PASS - duplicate=True, sent=False, one frame",
+    "wrong_peer_session_replyto_hash": "PASS - peer_unavailable / session_mismatch / receipt_*_mismatch; none reports success",
+    "timeout_unknown_no_second_send": "PASS - delivery_unknown, one frame, retry replays the recorded outcome",
+    "control_congestion_leaves_text_usable": "PASS - silent control peer holds inject 3 s while a real text ROUTER answers in under 1 s",
+    "close_releases_port": "PASS - pending inject resolves, is_running False, port rebindable, start/close repeatable",
+    "b00_injection_batch_object": "PASS - dataclass with to_dict/payload_hash accepted; an opaque object is refused as invalid_batch",
+    "legacy_three_channels": "NOT_RUN - test_plugin_channels blocked by the environment; test_zmq_transport passes and the congestion test drives a real text ROUTER alongside control"
+  }
+}

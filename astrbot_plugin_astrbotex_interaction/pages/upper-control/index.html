@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>上位控制</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+
+    <header class="page-head">
+      <div class="head-text">
+        <h1 data-i18n="pages.upper-control.title">上位控制</h1>
+        <p class="sub" data-i18n="pages.upper-control.subtitle">
+          动作目录、公共提示词、模型与通道设置、本地下发记录
+        </p>
+      </div>
+      <div class="head-status">
+        <span class="chip" id="status-control" data-state="unknown" title="control 通道状态">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="status-control-text">通道未知</span>
+        </span>
+        <span class="chip" id="status-ex" data-state="unknown" title="EX 能力快照">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="status-ex-text">EX 未知</span>
+        </span>
+        <span class="chip chip-quiet" id="status-revision">rev —</span>
+        <button type="button" class="btn btn-ghost" id="btn-refresh" disabled>
+          <span data-i18n="pages.upper-control.refresh">刷新</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="banner" id="banner" role="alert" hidden>
+      <p class="banner-text" id="banner-text"></p>
+      <div class="banner-actions">
+        <button type="button" class="btn btn-primary" id="banner-primary" hidden></button>
+        <button type="button" class="btn" id="banner-secondary" hidden></button>
+        <button type="button" class="btn btn-ghost" id="banner-dismiss">
+          <span data-i18n="pages.upper-control.dismiss">关闭</span>
+        </button>
+      </div>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="上位控制分区">
+      <button
+        type="button"
+        role="tab"
+        id="tab-actions"
+        class="tab"
+        aria-controls="panel-actions"
+        aria-selected="true"
+        data-panel="actions"
+      >
+        <span data-i18n="pages.upper-control.tab.actions">动作目录</span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="tab-prompts"
+        class="tab"
+        aria-controls="panel-prompts"
+        aria-selected="false"
+        tabindex="-1"
+        data-panel="prompts"
+      >
+        <span data-i18n="pages.upper-control.tab.prompts">公共提示词</span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="tab-settings"
+        class="tab"
+        aria-controls="panel-settings"
+        aria-selected="false"
+        tabindex="-1"
+        data-panel="settings"
+      >
+        <span data-i18n="pages.upper-control.tab.settings">模型与通道</span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="tab-records"
+        class="tab"
+        aria-controls="panel-records"
+        aria-selected="false"
+        tabindex="-1"
+        data-panel="records"
+      >
+        <span data-i18n="pages.upper-control.tab.records">下发记录</span>
+      </button>
+    </nav>
+
+    <main id="main" inert aria-busy="true">
+      <!-- ── 动作目录 ─────────────────────────────────────────────── -->
+      <section
+        id="panel-actions"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-actions"
+        tabindex="0"
+      >
+        <div class="split">
+          <div class="list-col">
+            <div class="list-tools">
+              <div class="field">
+                <label class="label" for="action-search">搜索</label>
+                <input
+                  type="search"
+                  id="action-search"
+                  class="input"
+                  placeholder="名称、简介或 action_id"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="chips" role="group" aria-label="按层次筛选">
+                <button type="button" class="chip-toggle" data-level="all" aria-pressed="true">
+                  全部
+                </button>
+                <button type="button" class="chip-toggle" data-level="primitive" aria-pressed="false">
+                  primitive
+                </button>
+                <button type="button" class="chip-toggle" data-level="basic" aria-pressed="false">
+                  basic
+                </button>
+                <button type="button" class="chip-toggle" data-level="skill" aria-pressed="false">
+                  skill
+                </button>
+              </div>
+              <button type="button" class="btn btn-primary btn-block" id="btn-new-action">
+                新增动作
+              </button>
+            </div>
+            <ul class="action-list" id="action-list" aria-label="动作条目"></ul>
+            <p class="empty" id="action-empty" hidden>还没有动作条目。</p>
+          </div>
+
+          <div class="editor-col">
+            <p class="empty" id="editor-empty">
+              从左侧选择一个条目，或点击“新增动作”创建草稿。
+            </p>
+
+            <form id="action-form" class="editor" novalidate hidden>
+              <div class="editor-head">
+                <h2 class="editor-title" id="editor-title">动作详情</h2>
+                <div class="editor-badges">
+                  <span class="badge" id="action-ref-badge">未保存</span>
+                  <span class="badge" id="action-ex-badge" data-state="unknown">EX 未知</span>
+                </div>
+              </div>
+
+              <div class="grid-2">
+                <div class="field">
+                  <label class="label" for="field-name">名称</label>
+                  <input id="field-name" class="input" type="text" maxlength="128" required />
+                  <p class="hint" id="hint-name">模型与用户在目录里看到的短名称。</p>
+                  <p class="error" id="error-name" role="alert" hidden></p>
+                </div>
+                <div class="field">
+                  <label class="label" for="field-level">层次</label>
+                  <select id="field-level" class="input">
+                    <option value="primitive">primitive</option>
+                    <option value="basic">basic</option>
+                    <option value="skill">skill</option>
+                  </select>
+                  <p class="hint" id="hint-level">
+                    primitive / basic 关联 EX 已有动作；skill 是独立说明，不含可执行 ID。
+                  </p>
+                  <p class="error" id="error-level" role="alert" hidden></p>
+                </div>
+              </div>
+
+              <div class="field" id="field-action-id-wrap">
+                <label class="label" for="field-action-id">EX action_id</label>
+                <input
+                  id="field-action-id"
+                  class="input mono"
+                  type="text"
+                  maxlength="128"
+                  aria-describedby="hint-action-id"
+                />
+                <p class="hint" id="hint-action-id">
+                  只填写 EX 已注册的动作 ID。此处不提交执行权限或机器契约。
+                </p>
+                <p class="error" id="error-action-id" role="alert" hidden></p>
+              </div>
+
+              <div class="field">
+                <label class="label" for="field-description">简介</label>
+                <textarea
+                  id="field-description"
+                  class="input textarea"
+                  rows="3"
+                  maxlength="8192"
+                  aria-describedby="hint-description"
+                ></textarea>
+                <p class="hint" id="hint-description">
+                  说明这个动作在什么场景下使用。Markdown 只作为纯文本保存。
+                </p>
+                <p class="error" id="error-description" role="alert" hidden></p>
+              </div>
+
+              <div class="field">
+                <label class="label" for="field-stages">使用阶段</label>
+                <input
+                  id="field-stages"
+                  class="input"
+                  type="text"
+                  placeholder="用逗号分隔，例如：定位, 接近, 抓取"
+                  aria-describedby="hint-stages"
+                />
+                <p class="hint" id="hint-stages">留空表示不限定阶段。</p>
+              </div>
+
+              <fieldset class="field fieldset">
+                <legend class="label">参数说明</legend>
+                <p class="hint" id="hint-params">
+                  只描述语义、单位与是否必填；具体取值范围由 EX 驱动与安全层决定。
+                </p>
+                <div class="table-wrap">
+                  <table class="param-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">名称</th>
+                        <th scope="col">说明</th>
+                        <th scope="col">单位</th>
+                        <th scope="col" class="col-required">必填</th>
+                        <th scope="col" class="col-actions"><span class="sr-only">操作</span></th>
+                      </tr>
+                    </thead>
+                    <tbody id="param-rows"></tbody>
+                  </table>
+                </div>
+                <button type="button" class="btn btn-ghost" id="btn-add-param">添加参数</button>
+              </fieldset>
+
+              <div class="field">
+                <label class="label" for="field-skill">Skill Markdown</label>
+                <textarea
+                  id="field-skill"
+                  class="input textarea mono tall"
+                  rows="10"
+                  spellcheck="false"
+                  aria-describedby="hint-skill"
+                ></textarea>
+                <p class="hint" id="hint-skill">
+                  与公共提示词分区维护；这里的内容只进入动作说明，不覆盖公共规范。
+                </p>
+                <div class="preview-toggle">
+                  <button type="button" class="btn btn-ghost" id="btn-preview-skill" aria-expanded="false">
+                    预览模型将读取的内容
+                  </button>
+                </div>
+                <pre class="preview" id="preview-skill" hidden aria-label="Skill 内容预览"></pre>
+              </div>
+
+              <div class="field field-inline">
+                <input type="checkbox" id="field-enabled" class="checkbox" />
+                <label class="label-inline" for="field-enabled">启用该条目</label>
+              </div>
+
+              <p class="hint readonly-note" id="readonly-note">
+                运行可用性来自 EX 能力快照，不能在这里勾选制造。
+              </p>
+
+              <div class="editor-footer">
+                <button type="button" class="btn btn-primary" id="btn-save-action">保存</button>
+                <button type="button" class="btn btn-danger" id="btn-delete-action">删除条目</button>
+                <button type="button" class="btn btn-ghost" id="btn-discard-action">丢弃草稿</button>
+                <span class="save-state" id="save-state" role="status" aria-live="polite"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 公共提示词 ───────────────────────────────────────────── -->
+      <section
+        id="panel-prompts"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-prompts"
+        tabindex="0"
+        hidden
+      >
+        <p class="panel-intro">
+          公共路由规范与公共编排规范分别维护，与动作自身的 Skill 说明分开保存。留空表示使用插件内置文本。
+        </p>
+        <div class="prompt-grid">
+          <article class="card" data-kind="routing">
+            <header class="card-head">
+              <h2 class="card-title">路由规范</h2>
+              <span class="badge" data-role="source" data-state="builtin">内置</span>
+            </header>
+            <p class="hint" data-role="meta">—</p>
+            <label class="label" for="prompt-routing">覆盖内容</label>
+            <textarea
+              id="prompt-routing"
+              class="input textarea mono tall"
+              rows="12"
+              spellcheck="false"
+            ></textarea>
+            <div class="card-actions">
+              <button type="button" class="btn btn-primary" data-role="save" data-kind="routing">
+                保存
+              </button>
+              <button type="button" class="btn btn-ghost" data-role="restore" data-kind="routing">
+                恢复默认
+              </button>
+              <button type="button" class="btn btn-ghost" data-role="preview" data-kind="routing" aria-expanded="false">
+                预览
+              </button>
+            </div>
+            <pre class="preview" id="preview-routing" hidden aria-label="路由规范预览"></pre>
+          </article>
+
+          <article class="card" data-kind="planning">
+            <header class="card-head">
+              <h2 class="card-title">编排规范</h2>
+              <span class="badge" data-role="source" data-state="builtin">内置</span>
+            </header>
+            <p class="hint" data-role="meta">—</p>
+            <label class="label" for="prompt-planning">覆盖内容</label>
+            <textarea
+              id="prompt-planning"
+              class="input textarea mono tall"
+              rows="12"
+              spellcheck="false"
+            ></textarea>
+            <div class="card-actions">
+              <button type="button" class="btn btn-primary" data-role="save" data-kind="planning">
+                保存
+              </button>
+              <button type="button" class="btn btn-ghost" data-role="restore" data-kind="planning">
+                恢复默认
+              </button>
+              <button type="button" class="btn btn-ghost" data-role="preview" data-kind="planning" aria-expanded="false">
+                预览
+              </button>
+            </div>
+            <pre class="preview" id="preview-planning" hidden aria-label="编排规范预览"></pre>
+          </article>
+        </div>
+      </section>
+
+      <!-- ── 模型与通道 ───────────────────────────────────────────── -->
+      <section
+        id="panel-settings"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-settings"
+        tabindex="0"
+        hidden
+      >
+        <form id="settings-form" class="settings-grid" novalidate>
+          <article class="card">
+            <header class="card-head">
+              <h2 class="card-title">模型</h2>
+            </header>
+            <div class="field">
+              <label class="label" for="field-routing-provider">决策模型 Provider</label>
+              <select id="field-routing-provider" class="input"></select>
+              <p class="hint" id="hint-routing-provider">
+                只列出本机已配置的 Provider。这里不提供密钥输入。
+              </p>
+            </div>
+            <div class="field">
+              <label class="label" for="field-generation-provider">生成模型 Provider</label>
+              <select id="field-generation-provider" class="input"></select>
+              <p class="hint" id="hint-generation-provider">留空表示与决策模型相同。</p>
+            </div>
+            <div class="field">
+              <label class="label" for="field-timeout">模型超时（秒）</label>
+              <input id="field-timeout" class="input" type="number" min="1" max="600" step="1" />
+              <p class="error" id="error-timeout" role="alert" hidden></p>
+            </div>
+            <p class="stale-note" id="provider-stale" hidden></p>
+          </article>
+
+          <article class="card">
+            <header class="card-head">
+              <h2 class="card-title">通道</h2>
+              <span class="badge badge-quiet" id="reload-badge" hidden>重载后生效</span>
+            </header>
+            <div class="field field-inline">
+              <input type="checkbox" id="field-upper-enabled" class="checkbox" />
+              <label class="label-inline" for="field-upper-enabled">启用上位控制</label>
+            </div>
+            <div class="field field-inline">
+              <input type="checkbox" id="field-control-enabled" class="checkbox" />
+              <label class="label-inline" for="field-control-enabled">启用独立 control 通道</label>
+            </div>
+            <div class="grid-2">
+              <div class="field">
+                <label class="label" for="field-bind-host">监听地址</label>
+                <input id="field-bind-host" class="input mono" type="text" maxlength="255" />
+                <p class="error" id="error-bind-host" role="alert" hidden></p>
+              </div>
+              <div class="field">
+                <label class="label" for="field-port">监听端口</label>
+                <input id="field-port" class="input" type="number" min="1" max="65535" />
+                <p class="error" id="error-port" role="alert" hidden></p>
+              </div>
+            </div>
+            <div class="field">
+              <label class="label" for="field-peer">可信 peer</label>
+              <input id="field-peer" class="input mono" type="text" maxlength="128" />
+              <p class="hint">下发时必须显式指定该 peer；不使用默认 peer。</p>
+            </div>
+            <div class="field">
+              <label class="label" for="field-robot">机器人标识</label>
+              <input id="field-robot" class="input mono" type="text" maxlength="128" />
+              <p class="hint">用于核对批次身份，不接受由模型或页面生成的取值。</p>
+            </div>
+            <p class="hint" id="runtime-note">—</p>
+            <div class="card-actions">
+              <button type="button" class="btn btn-primary" id="btn-save-settings">保存设置</button>
+              <span class="save-state" id="settings-save-state" role="status" aria-live="polite"></span>
+            </div>
+          </article>
+        </form>
+      </section>
+
+      <!-- ── 本地下发记录 ─────────────────────────────────────────── -->
+      <section
+        id="panel-records"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-records"
+        tabindex="0"
+        hidden
+      >
+        <p class="panel-intro">
+          只读展示。received 表示已登记，injected 表示已交入 EX 模型输入；两者都不代表执行完成。本轮没有自动续发或运动重试。
+        </p>
+        <div class="table-wrap">
+          <table class="record-table">
+            <caption class="sr-only">本地上位计划列表</caption>
+            <thead>
+              <tr>
+                <th scope="col">plan_id</th>
+                <th scope="col">路由</th>
+                <th scope="col" class="num">段落</th>
+                <th scope="col" class="num">已发前缀</th>
+                <th scope="col" class="num">待发后缀</th>
+                <th scope="col">投递状态</th>
+                <th scope="col">版本</th>
+              </tr>
+            </thead>
+            <tbody id="record-rows"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="record-empty" hidden>还没有本地计划记录。</p>
+        <div class="card-actions">
+          <button type="button" class="btn btn-ghost" id="btn-more-plans" hidden>载入更多</button>
+        </div>
+
+        <article class="card" id="record-detail" hidden>
+          <header class="card-head">
+            <h2 class="card-title" id="record-detail-title">计划详情</h2>
+            <span class="badge" id="record-detail-phase" data-state="unknown">未知</span>
+          </header>
+          <dl class="kv" id="record-detail-meta"></dl>
+          <h3 class="sub-title">段落</h3>
+          <ol class="segment-list" id="record-segments"></ol>
+          <h3 class="sub-title">投递</h3>
+          <ul class="delivery-list" id="record-deliveries"></ul>
+        </article>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+    <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title">
+      <form method="dialog">
+        <h2 class="dialog-title" id="confirm-title">确认操作</h2>
+        <p class="dialog-body" id="confirm-body"></p>
+        <div class="dialog-actions">
+          <button type="submit" class="btn" value="cancel" id="confirm-cancel">取消</button>
+          <button type="submit" class="btn btn-danger" value="ok" id="confirm-ok">继续</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="param-row-template">
+      <tr class="param-row">
+        <td>
+          <label class="sr-only" data-role="param-name-label">参数名称</label>
+          <input class="input input-compact" type="text" maxlength="64" data-role="param-name" />
+        </td>
+        <td>
+          <label class="sr-only" data-role="param-desc-label">参数说明</label>
+          <input class="input input-compact" type="text" maxlength="512" data-role="param-description" />
+        </td>
+        <td>
+          <label class="sr-only" data-role="param-unit-label">参数单位</label>
+          <input class="input input-compact" type="text" maxlength="32" data-role="param-unit" />
+        </td>
+        <td class="col-required">
+          <input class="checkbox" type="checkbox" data-role="param-required" />
+        </td>
+        <td class="col-actions">
+          <button type="button" class="btn btn-ghost btn-compact" data-role="param-remove">
+            移除
+          </button>
+        </td>
+      </tr>
+    </template>
+
+    <template id="action-item-template">
+      <li class="action-item">
+        <button type="button" class="action-item-button">
+          <span class="action-item-name"></span>
+          <span class="action-item-meta"></span>
+        </button>
+      </li>
+    </template>
+
+    <template id="record-row-template">
+      <tr class="record-row">
+        <td class="mono cell-plan"></td>
+        <td class="cell-route"></td>
+        <td class="num cell-total"></td>
+        <td class="num cell-sent"></td>
+        <td class="num cell-pending"></td>
+        <td><span class="badge cell-phase" data-state="unknown"></span></td>
+        <td class="mono cell-version"></td>
+      </tr>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

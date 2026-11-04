@@ -1,0 +1,96 @@
+{
+  "task_id": "B08",
+  "status": "PASS",
+  "scope": [
+    "unit_fake (fake_bridge)",
+    "browser capture"
+  ],
+  "code_revision": {
+    "repo": "D:/Code/A.E.B",
+    "worktree": "D:\\Code\\A.E.B-work\\upper-b07-b08",
+    "branch": "upper/B07-B08",
+    "head": "717dfd7 B07+B08: dashboard management API and native plugin page",
+    "base": "b8b448e",
+    "dirty_tree": "M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/01-actions-empty.png\n M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/03-action-saved.png\n M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/04-delete-confirm.png\n M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/06-settings.png\n M astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/upper_control_evidence.json\n?? port_artifacts/"
+  },
+  "changed_files": {
+    "added": [
+      "astrbot_plugin_astrbotex_interaction/pages/upper-control/index.html",
+      "astrbot_plugin_astrbotex_interaction/pages/upper-control/style.css",
+      "astrbot_plugin_astrbotex_interaction/pages/upper-control/app.js",
+      "astrbot_plugin_astrbotex_interaction/.astrbot-plugin/i18n/zh-CN.json",
+      "astrbot_plugin_astrbotex_interaction/tests/ui/upper_control.spec.mjs",
+      "astrbot_plugin_astrbotex_interaction/tests/ui/artifacts/ (9 PNG + evidence JSON)"
+    ],
+    "modified": [],
+    "deleted": []
+  },
+  "interfaces": {
+    "bridge": [
+      "ready()",
+      "apiGet()",
+      "apiPost()",
+      "onContext()",
+      "t()"
+    ],
+    "areas": [
+      "actions",
+      "prompts",
+      "settings",
+      "records"
+    ],
+    "modes": [
+      "fake_bridge (default)",
+      "real_host (needs UPPER_HOST_URL)"
+    ]
+  },
+  "dependencies": {
+    "upstream": [
+      "B07 (endpoint shapes and error codes)"
+    ],
+    "consumers_to_retest": [
+      "B10 (page registration)"
+    ]
+  },
+  "entry_points": [
+    "pages/upper-control/index.html"
+  ],
+  "tests": {
+    "commands": [
+      [
+        "node",
+        "--test",
+        "tests/ui/upper_control.spec.mjs"
+      ]
+    ],
+    "task_suite": "node --test tests/ui/upper_control.spec.mjs -> pass 12, fail 0, skipped 1 (real_host NOT_RUN)",
+    "task_suite_exit_zero": true
+  },
+  "evidence": {
+    "directory": "port_artifacts/upper/B08/20261102T074928Z",
+    "files": [
+      "handoff.json",
+      "commands.log",
+      "results.json"
+    ],
+    "screenshots": [
+      "01-actions-empty.png",
+      "02-action-draft.png",
+      "03-action-saved.png",
+      "04-delete-confirm.png",
+      "05-prompts.png",
+      "06-settings.png",
+      "07-records-detail.png",
+      "08-dark-actions.png",
+      "09-narrow-dark-records.png"
+    ],
+    "api_assertions": "D:\\Code\\A.E.B-work\\upper-b07-b08\\astrbot_plugin_astrbotex_interaction\\tests\\ui\\artifacts\\upper_control_evidence.json"
+  },
+  "known_issues": [
+    "real_host mode is NOT_RUN: it needs UPPER_HOST_URL plus an isolated Dashboard login, neither of which was provided. The spec writes upper_control.NOT_RUN.txt and never reports it as a pass.",
+    "Screenshots come from fake_bridge mode: a real browser rendering the real page against a fixture backend. They are not proof of a live Host round trip."
+  ],
+  "rollback": [
+    "Delete pages/upper-control/; the plugin page simply stops appearing."
+  ]
+}

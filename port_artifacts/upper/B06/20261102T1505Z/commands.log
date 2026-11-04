@@ -1,0 +1,15 @@
+# B06 evidence run 20261102T1505Z
+# revision 3569ab488e766ea3af8cdd15cd83bcaa7ea9a864
+# worktree D:/Code/A.E.B-work/upper-b04-b06 (branch upper/B04-B06)
+# interpreter: Python 3.12 (pyzmq 27.1.0). The 3.13 interpreter has no pyzmq and
+# cannot run any socket test; the 3.12 run is the authoritative evidence.
+# working directory: D:/Code/A.E.B-work/upper-b04-b06
+# every socket is bound to 127.0.0.1 on an ephemeral port; no external network,
+# no device, no model.
+
+python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_control_channel.py -v
+python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_plugin_channels.py -v
+python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_zmq_transport.py -v
+
+# baseline comparison (untouched worktree D:/Code/A.E.B) recorded in
+# baseline_and_transport_regression.log

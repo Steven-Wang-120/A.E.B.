@@ -1,0 +1,35 @@
+{
+  "task_id": "B02",
+  "record_type": "supplemental integration verification; does not recreate original task history",
+  "code_revision": {
+    "aeb": "274e1df404437b986c0906852e545a9d5d4399d3",
+    "ex": "ebd4947abca6d68e0880aa3b9a2922a542f1fb28"
+  },
+  "changed_files": [
+    "astrbot_plugin_astrbotex_interaction/upper_prompts.py"
+  ],
+  "interfaces": "PromptAssembler frozen snapshots",
+  "dependencies": [
+    "current AstrBot Host 4.26.7",
+    "B00-B09 integrated modules"
+  ],
+  "entry_points": [
+    "astrbot_plugin_astrbotex_interaction/upper_prompts.py"
+  ],
+  "tests": [
+    "aeb:test_upper_prompts"
+  ],
+  "evidence": "../../B11/repair-20261103 (raw command logs and source manifest)",
+  "scope": "recorded integration subset; PASS does not approve whole A.md",
+  "known_issues": [
+    "NOT_RUN: complete independent crash/restart and all deployment/output matrices remain outstanding"
+  ],
+  "consumers_to_retest": [
+    "B07",
+    "B08",
+    "B09",
+    "B10",
+    "B11"
+  ],
+  "rollback": "Disable upper_enabled/control_enabled, reload; preserve database, plans and unknown delivery rows."
+}

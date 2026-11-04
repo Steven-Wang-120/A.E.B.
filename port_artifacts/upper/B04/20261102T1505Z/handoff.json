@@ -1,0 +1,83 @@
+{
+  "task_id": "B04",
+  "title": "计划与投递持久化",
+  "status": "PASS",
+  "scope": "unit_fake: real SQLite + real TaskStore transactions; models/control are not exercised here.",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "code_revision_short": "3569ab4",
+  "environment": {
+    "os": "Windows 11 (10.0.26200)",
+    "python_primary": "3.12 (C:/Users/17088/AppData/Local/Programs/Python/Python312/python.exe)",
+    "python_alt": "3.13.12 (C:/Users/17088/.workbuddy-ai/binaries/python/versions/3.13.12/python.exe)",
+    "worktree": "D:/Code/A.E.B-work/upper-b04-b06",
+    "branch": "upper/B04-B06",
+    "host_version": "AstrBot 4.26.7 present at D:/Code/AstrBot-latest (read-only, not on PYTHONPATH)",
+    "dirty_tree": "?? port_artifacts/"
+  },
+  "changed_files": [
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/upper_store.py",
+      "change": "added",
+      "lines": 611
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/tests/test_upper_store.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/task_store.py",
+      "change": "modified",
+      "note": "additive init_extension_tables() DDL hook only; no existing method changed, no table dropped"
+    }
+  ],
+  "interfaces": {
+    "UpperStore.__init__(store, *, clock, recover)": "reuses the caller's TaskStore connection; never opens a second long-lived DB or nests BEGIN",
+    "claim_input(*, platform, origin, source_message_id, robot_id, user_id, session_id) -> (record, claimed)": "deterministic sha256 claim key over the identity triple; text is never used for dedupe",
+    "save_result(input_key, result, *, generation, settings/catalog/prompt snapshots + hashes) -> plan": "one transaction; same result replays the same ids, different result is id_conflict",
+    "reserve_batch(plan_id, *, peer, ex_session, robot_id, route_ref) -> batch": "freezes C01 envelope + payload_hash; one batch per plan (unique index)",
+    "record_delivery(batch_id, phase, *, error_code, receipt) -> batch": "phases received/injected/rejected/delivery_unknown; only the batch's own segments move",
+    "claim_public_reply(plan_id) -> (reply, claimed)": "single public exit per plan, claimed before send",
+    "record_public_delivery(reply_id, status, *, error_code)": "sending/sent/delivery_unknown",
+    "get_plan(plan_id) / list_plans(limit, offset)": "read-only projection for B07; snapshot bodies withheld, hashes exposed",
+    "recover() -> counts": "sending -> delivery_unknown + fence, pending left pending, no auto-resend",
+    "payload_hash(payload) / input_key(...)": "C01 canonical SHA-256 helpers",
+    "normalize_result(result)": "route/field combination, 64-segment, 4096-char and 256 KiB guards; refuses rather than truncating"
+  },
+  "dependencies": [
+    {
+      "task": "B00",
+      "need": "UpperResult / TrustedUpperInput / InjectionBatch field names; canonical JSON hash must match payload_hash()",
+      "state": "not present in this worktree; consumed through the documented C01 field surface"
+    }
+  ],
+  "entry_points": "None yet. B10 constructs UpperStore(TaskStore) during plugin initialise and calls recover() implicitly through the constructor.",
+  "tests": {
+    "new": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_store.py -v -> 19 tests OK",
+    "regression": "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_task_store.py -v -> 6 tests OK"
+  },
+  "evidence": {
+    "dir": "port_artifacts/upper/B04/20261102T1505Z",
+    "files": [
+      "test_upper_store.log",
+      "test_task_store.log",
+      "handoff.json",
+      "results.json",
+      "commands.log"
+    ],
+    "layers": [
+      "unit_fake"
+    ]
+  },
+  "known_issues": [
+    "Suffix continuation is intentionally absent: reserve_batch returns the existing batch, so segment 3 of a send_count=2 plan stays pending forever in this round.",
+    "recover() is process-scoped: a batch already terminal at delivery_unknown is never revisited, which is the intended conservative behaviour but means an operator must open a new input to retry.",
+    "payload_hash() duplicates B00's canonical hash by design (C01 recipe). It is injectable (hasher=) so B10 can wire upper_contracts' implementation when B00 lands."
+  ],
+  "consumers_to_retest": [
+    "B05 (pipeline uses every store method)",
+    "B07 (get_plan/list_plans projection)",
+    "B10 (construction + lifecycle)",
+    "B11 (e2e)"
+  ],
+  "rollback": "Disable the new feature; the upper_* tables remain and older builds ignore them. Reverting the commit removes only the new module and the additive DDL hook."
+}

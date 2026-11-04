@@ -1,0 +1,20 @@
+{
+  "run_id": "20261102T074928Z",
+  "task_id": "B08",
+  "generated_at": "2026-11-02T07:55:26Z",
+  "commands": [
+    {
+      "command": [
+        "node",
+        "--test",
+        "tests/ui/upper_control.spec.mjs"
+      ],
+      "cwd": "D:\\Code\\A.E.B-work\\upper-b07-b08\\astrbot_plugin_astrbotex_interaction",
+      "exit_code": 0,
+      "duration_s": 6.31,
+      "scope": "unit_fake (fake_bridge) + browser capture",
+      "summary": "# fail 0",
+      "not_run_reason": "real_host skipped: UPPER_UI_MODE=real_host not selected"
+    }
+  ]
+}

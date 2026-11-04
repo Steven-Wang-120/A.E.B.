@@ -1,0 +1,113 @@
+{
+  "task_id": "B05",
+  "title": "输入流水线与双路输出",
+  "status": "PASS",
+  "scope": "unit_fake: real UpperStore + real UpperOutputRouter; B01/B02/B03 and both senders are substitutes. Real Host event wiring belongs to B10/B11.",
+  "code_revision": "3569ab488e766ea3af8cdd15cd83bcaa7ea9a864",
+  "environment": {
+    "os": "Windows 11 (10.0.26200)",
+    "python_primary": "3.12 at C:/Users/17088/AppData/Local/Programs/Python/Python312/python.exe (pyzmq 27.1.0)",
+    "python_alt": "3.13.12 at C:/Users/17088/.workbuddy-ai/binaries/python/versions/3.13.12/python.exe (no pyzmq -> socket suites cannot run)",
+    "worktree": "D:/Code/A.E.B-work/upper-b04-b06",
+    "branch": "upper/B04-B06",
+    "host_version": "AstrBot 4.26.7 at D:/Code/AstrBot-latest (read-only; astrbot package not importable here)",
+    "upstream_contract": "B00 upper_contracts.py read from D:/Code/A.E.B-work/upper-b00-b03 @ 384eec0; not copied into this branch"
+  },
+  "changed_files": [
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/upper_pipeline.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/tests/test_upper_pipeline.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/tests/test_upper_output_isolation.py",
+      "change": "added"
+    },
+    {
+      "path": "astrbot_plugin_astrbotex_interaction/output_router.py",
+      "change": "modified",
+      "note": "appended UpperOutputRouter + upper_* constants; PublicOutputRouter untouched"
+    }
+  ],
+  "interfaces": {
+    "UpperPipeline.process(trusted, *, public_sender, peer) -> result": "handled, suppress_default, error_code, plan_id (+ route, control_status, public_sent, duplicate, control_error, public_error)",
+    "argmax_route(probabilities) -> route": "framework-side decision, C01 tie order",
+    "contract_code(code) -> code": "folds store-level invalid_<field> into invalid_result so consumers only see B00's table",
+    "UpperOutputRouter.permits_public_output(source, *, plan_id)": "True only for upper_public without plan_id",
+    "UpperOutputRouter.permits_automatic_output(source, *, plan_id)": "False for every upper_* source and any plan_id; the Host output-hook gate",
+    "UpperOutputRouter.claim(*, source, plan_id, reply_id, request_id)": "raises source_not_public / invalid_source",
+    "UpperOutputRouter.emit_public(plan_id, sender)": "claim -> sending -> await sender(text) -> sent/delivery_unknown",
+    "TrustedUpperInput accepted shapes": "B00 dataclass (input_key + _marker) or the pre-B00 mapping (trusted flag + sender)"
+  },
+  "dependencies": [
+    {
+      "task": "B00",
+      "need": "TrustedUpperInput / UpperResult / PromptSnapshotMeta field names",
+      "state": "adapted to the published dataclass surface; both shapes accepted"
+    },
+    {
+      "task": "B01",
+      "need": "settings.load(), catalog.snapshot()",
+      "state": "substitutes"
+    },
+    {
+      "task": "B02",
+      "need": "PromptAssembler.build() with prompt_hash/catalog_version/settings_hash",
+      "state": "substitute"
+    },
+    {
+      "task": "B03",
+      "need": "classify/generate",
+      "state": "substitutes"
+    },
+    {
+      "task": "B04",
+      "need": "store methods",
+      "state": "in this worktree"
+    },
+    {
+      "task": "B06",
+      "need": "capabilities/inject",
+      "state": "in this worktree"
+    }
+  ],
+  "entry_points": "B10 calls process() from the real event hook with a public_sender bound to that event.",
+  "tests": {
+    "new": [
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_pipeline.py -v -> 22 OK",
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_upper_output_isolation.py -v -> 12 OK"
+    ],
+    "regression": [
+      "python -B -m unittest discover -s astrbot_plugin_astrbotex_interaction/tests -p test_public_output_router.py -v -> 5 OK"
+    ]
+  },
+  "evidence": {
+    "dir": "port_artifacts/upper/B05/20261102T1530Z",
+    "files": [
+      "test_upper_pipeline.log",
+      "test_upper_output_isolation.log",
+      "test_public_output_router.log",
+      "baseline_and_transport_regression.log",
+      "handoff.json",
+      "results.json",
+      "commands.log"
+    ],
+    "layers": [
+      "unit_fake"
+    ]
+  },
+  "known_issues": [
+    "public_text semantics are not enforced; only field routing is. C04 §2 accepts this.",
+    "The pre-B00 mapping shape needs a real sender object; B00's dataclass shape relies on _marker instead. Both are checked, neither can be forged from a model result.",
+    "Pipeline-local diagnostics outside B00's table remain: config_invalid, decision_error, generation_error, generation_stale, peer_unavailable, capabilities_unavailable, public_sender_missing. Format violations are already folded into invalid_result; the rest await a table decision.",
+    "input_busy still delivers the generated public text and reserves no batch, so no segment can be sent later for that plan."
+  ],
+  "consumers_to_retest": [
+    "B10",
+    "B11"
+  ],
+  "rollback": "Stop constructing UpperPipeline; the legacy PublicOutputRouter is untouched and upper_* tables stay."
+}

@@ -1,0 +1,27 @@
+== baseline comparison: untouched worktree D:/Code/A.E.B (no changes from B04-B06) ==
+--- test_plugin_channels ---
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)
+--- test_planning_tools ---
+
+----------------------------------------------------------------------
+Ran 7 tests in 1.708s
+
+FAILED (failures=1, errors=9)
+
+== this worktree ==
+--- test_plugin_channels ---
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)
+--- test_planning_tools ---
+
+----------------------------------------------------------------------
+Ran 7 tests in 1.773s
+
+FAILED (failures=1, errors=9)
